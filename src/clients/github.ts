@@ -5,27 +5,39 @@ import { env } from '../config.js';
 
 const run = promisify(execFile);
 
+/**
+ * Auth flags for a single git invocation, via a per-command HTTP header rather than a
+ * token embedded in the remote URL. This matters: on machines using Git Credential Manager
+ * (Windows' default `credential.helper = manager`), a token baked into a clone URL gets
+ * silently cached and then reused for *every* github.com remote afterward — including
+ * unrelated repos the user is logged into normally, breaking their own pushes with a
+ * wrong-scope 403. `-c credential.helper=` disables the helper for just this process, and
+ * `http.extraHeader` supplies the credential directly, so nothing ever touches the OS
+ * credential store.
+ */
+function authFlags(token: string | null): string[] {
+  if (!token) return [];
+  const basic = Buffer.from(`x-access-token:${token}`).toString('base64');
+  return ['-c', 'credential.helper=', '-c', `http.extraHeader=Authorization: Basic ${basic}`];
+}
+
 async function git(args: string[], cwd: string): Promise<string> {
-  const { stdout } = await run('git', args, { cwd, maxBuffer: 16 * 1024 * 1024 });
+  const { stdout } = await run('git', [...authFlags(env.githubToken()), ...args], {
+    cwd,
+    maxBuffer: 16 * 1024 * 1024,
+  });
   return stdout.trim();
 }
 
-/**
- * Shallow-clone `owner/repo` into `destDir`. If a token is present it's baked into the
- * remote URL, so a later `git push` from that same clone just works — this is a scratch
- * checkout, not a long-lived one, so an embedded credential in .git/config is fine.
- */
+/** Shallow-clone `owner/repo` into `destDir`. Plain URL — see authFlags() for why. */
 export async function cloneRepo(
   owner: string,
   repo: string,
   destDir: string,
   branch: string | null,
 ): Promise<string> {
-  const token = env.githubToken();
-  const auth = token ? `x-access-token:${token}@` : '';
-  const url = `https://${auth}github.com/${owner}/${repo}.git`;
-
-  const args = ['clone', '--depth', '1'];
+  const url = `https://github.com/${owner}/${repo}.git`;
+  const args = [...authFlags(env.githubToken()), 'clone', '--depth', '1'];
   if (branch) args.push('--branch', branch);
   args.push(url, destDir);
 
