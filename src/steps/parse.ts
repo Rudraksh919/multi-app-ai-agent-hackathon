@@ -1,8 +1,9 @@
-import Anthropic from '@anthropic-ai/sdk';
-import { CONFIG } from '../config.js';
+import OpenAI from 'openai';
+import { CONFIG, env } from '../config.js';
 import type { ParsedReport } from '../types.js';
+import { toOpenAITools, type ToolDef } from '../agent/tools.js';
 
-const TOOL: Anthropic.Tool = {
+const TOOL: ToolDef = {
   name: 'record_report',
   description: 'Record the structured form of a bug report.',
   input_schema: {
@@ -49,21 +50,38 @@ is_bug_report according to whether an actual product failure is being described.
 Always call record_report exactly once.`;
 
 export async function parseReport(text: string, now = new Date()): Promise<ParsedReport> {
-  const client = new Anthropic();
-
-  const res = await client.messages.create({
-    model: CONFIG.models.triage,
-    max_tokens: 1024,
-    system: SYSTEM,
-    tools: [TOOL],
-    tool_choice: { type: 'tool', name: 'record_report' },
-    messages: [{ role: 'user', content: `<slack_message>\n${text}\n</slack_message>` }],
+  const openai = new OpenAI({
+    apiKey: env.openrouterKey(),
+    baseURL: CONFIG.llm.baseURL,
+    defaultHeaders: {
+      'HTTP-Referer': 'https://github.com/Rudraksh919/multi-app-ai-agent-hackathon',
+      'X-Title': 'bisect',
+    },
   });
 
-  const call = res.content.find((c): c is Anthropic.ToolUseBlock => c.type === 'tool_use');
-  if (!call) throw new Error('Triage model did not call record_report.');
+  const res = await openai.chat.completions.create({
+    model: CONFIG.models.triage,
+    max_tokens: 1024,
+    messages: [
+      { role: 'system', content: SYSTEM },
+      { role: 'user', content: `<slack_message>\n${text}\n</slack_message>` },
+    ],
+    tools: toOpenAITools([TOOL]),
+    tool_choice: { type: 'function', function: { name: 'record_report' } },
+  });
 
-  const input = call.input as Record<string, unknown>;
+  const call = res.choices[0]?.message.tool_calls?.[0];
+  if (!call || call.type !== 'function') {
+    throw new Error('Triage model did not call record_report.');
+  }
+
+  let input: Record<string, unknown>;
+  try {
+    input = JSON.parse(call.function.arguments || '{}') as Record<string, unknown>;
+  } catch {
+    throw new Error(`Triage model returned invalid JSON: ${call.function.arguments}`);
+  }
+
   const hoursBack = Math.min(Math.max(Number(input.hours_back) || 48, 1), 24 * 30);
   const email = typeof input.email === 'string' && input.email.includes('@') ? input.email : null;
 

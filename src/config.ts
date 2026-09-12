@@ -11,7 +11,7 @@ function optional(name: string, fallback: string): string {
 }
 
 export const env = {
-  anthropicKey: () => required('ANTHROPIC_API_KEY'),
+  openrouterKey: () => required('OPENROUTER_API_KEY'),
 
   slackToken: () => required('SLACK_BOT_TOKEN'),
   slackChannel: () => required('SLACK_CHANNEL_ID'),
@@ -27,17 +27,26 @@ export const env = {
 };
 
 export const CONFIG = {
-  models: {
-    /** Cheap, high-volume: parsing a Slack message into a structured report. */
-    triage: 'claude-sonnet-5',
-    /** The investigation loop — reasoning over traces and code. */
-    investigate: 'claude-opus-5',
+  /** OpenAI-compatible endpoint — OpenRouter, so the `openai` SDK works unmodified. */
+  llm: {
+    baseURL: 'https://openrouter.ai/api/v1',
   },
 
-  /** Per 1M tokens, for the cost line on the scorecard. */
+  models: {
+    /** Cheap, high-volume: parsing a Slack message into a structured report. */
+    triage: 'nvidia/nemotron-3.5-lightning:free',
+    /** The investigation loop — reasoning over traces and code. */
+    investigate: 'nvidia/nemotron-3-super-120b-a12b:free',
+  },
+
+  /**
+   * Per 1M tokens, for the cost line on the scorecard. Both models are free-tier on
+   * OpenRouter, so this is $0 today — kept as a real lookup (not hardcoded 0) so swapping
+   * to a paid model later just means adding a row here.
+   */
   pricing: {
-    'claude-sonnet-5': { input: 3, output: 15 },
-    'claude-opus-5': { input: 15, output: 75 },
+    'nvidia/nemotron-3.5-lightning:free': { input: 0, output: 0 },
+    'nvidia/nemotron-3-super-120b-a12b:free': { input: 0, output: 0 },
   } as Record<string, { input: number; output: number }>,
 
   agent: {

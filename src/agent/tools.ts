@@ -1,4 +1,3 @@
-import type Anthropic from '@anthropic-ai/sdk';
 import type { Diagnosis, Evidence, PostHogClient, PostHogEvent, RepoClient } from '../types.js';
 
 /** What a tool call produces: a human summary, optional evidence, optional loop exit. */
@@ -8,7 +7,18 @@ export interface ToolOutcome {
   terminal?: { kind: 'conclude'; diagnosis: Diagnosis } | { kind: 'abstain'; reason: string };
 }
 
-export const TOOLS: Anthropic.Tool[] = [
+/** Provider-agnostic tool definition — adapted to whichever SDK's shape at the call site. */
+export interface ToolDef {
+  name: string;
+  description: string;
+  input_schema: {
+    type: 'object';
+    properties: Record<string, unknown>;
+    required?: string[];
+  };
+}
+
+export const TOOLS: ToolDef[] = [
   {
     name: 'posthog_find_person',
     description:
@@ -52,9 +62,17 @@ export const TOOLS: Anthropic.Tool[] = [
     name: 'posthog_query',
     description:
       'Run arbitrary read-only HogQL against the events table. Use for questions the other ' +
-      'tools cannot answer, e.g. how many OTHER users hit the same pattern. ' +
-      "Example: SELECT count(DISTINCT person_id) FROM events WHERE event = 'checkout_failed' " +
-      "AND timestamp > '2026-09-01'.",
+      'tools cannot answer, e.g. how many OTHER users hit the same pattern.\n\n' +
+      'Schema: top-level columns are timestamp, event, distinct_id, person_id. Everything else ' +
+      "lives inside properties (a JSON map) — access it as properties.$session_id, " +
+      'properties.$current_url, properties.status, etc. There is no bare `session_id` or ' +
+      '`$person_id` column.\n\n' +
+      'Examples:\n' +
+      "  SELECT event, timestamp, properties.status FROM events WHERE distinct_id = 'abc' ORDER BY timestamp\n" +
+      "  SELECT count(DISTINCT person_id) FROM events WHERE event = 'checkout_response' " +
+      "AND properties.status = 402 AND timestamp > '2026-09-01'\n\n" +
+      'If a query errors, fix the specific problem and try once more — do not keep rephrasing ' +
+      'the same question. If a query returns nothing new, stop querying and use what you have.',
     input_schema: {
       type: 'object',
       properties: { sql: { type: 'string' } },
@@ -325,4 +343,16 @@ export async function runTool(
     default:
       return { text: `Unknown tool: ${name}` };
   }
+}
+
+/** Adapt our provider-agnostic ToolDef[] to the OpenAI-compatible function-calling shape. */
+export function toOpenAITools(tools: ToolDef[]) {
+  return tools.map((t) => ({
+    type: 'function' as const,
+    function: {
+      name: t.name,
+      description: t.description,
+      parameters: t.input_schema,
+    },
+  }));
 }
