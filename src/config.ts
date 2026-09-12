@@ -23,7 +23,15 @@ export const env = {
   linearKey: () => required('LINEAR_API_KEY'),
   linearTeam: () => process.env.LINEAR_TEAM_ID || null,
 
+  /**
+   * Repo access is either GITHUB_REPO ("owner/repo", cloned fresh via git) or a plain
+   * local REPO_PATH. GITHUB_REPO is what makes bisect work on any codebase rather than
+   * one fixed local checkout — see src/repo/resolve.ts.
+   */
   repoPath: () => optional('REPO_PATH', '../acme-shop'),
+  githubRepo: () => process.env.GITHUB_REPO || null, // "owner/repo"
+  githubBranch: () => process.env.GITHUB_BASE_BRANCH || null, // null = repo default
+  githubToken: () => process.env.GITHUB_TOKEN || null,
 };
 
 export const CONFIG = {
@@ -37,6 +45,10 @@ export const CONFIG = {
     triage: 'nvidia/nemotron-3.5-lightning:free',
     /** The investigation loop — reasoning over traces and code. */
     investigate: 'nvidia/nemotron-3-super-120b-a12b:free',
+    /** One-time-per-codebase discovery: mapping services -> bisect-skills/. Same tier as investigate. */
+    bootstrap: 'nvidia/nemotron-3-super-120b-a12b:free',
+    /** Writing an actual code patch. Same tier as investigate. */
+    implement: 'nvidia/nemotron-3-super-120b-a12b:free',
   },
 
   /**
@@ -53,6 +65,23 @@ export const CONFIG = {
     /** Hard ceiling on tool calls. Exhausting it is an abstention, not a failure. */
     maxSteps: 20,
     maxTokens: 8000,
+  },
+
+  skills: {
+    dir: 'bisect-skills',
+    maxSteps: 20,
+  },
+
+  implement: {
+    maxSteps: 15,
+    /** Only offer to auto-implement above this confidence. */
+    minConfidence: 0.7,
+  },
+
+  /** How long to wait for a ✅/🎫 reaction before defaulting to ticket-only. */
+  approval: {
+    pollIntervalMs: 5_000,
+    timeoutMs: 5 * 60_000,
   },
 
   slack: {

@@ -2,43 +2,67 @@
 
 An agent that investigates bug reports the way a human would: it reads the report in Slack,
 finds the user's real session in PostHog, reads the actual code, and files a Linear ticket
-with a cited diagnosis — or an honest "I don't know," never a confident guess.
+with a cited diagnosis — or an honest "I don't know," never a confident guess. It works on
+**any GitHub repo**, not one fixed codebase — the first time it investigates a repo it maps
+which observability services that repo actually uses and writes a small, reusable routing
+skill into it (`bisect-skills/`), so every bug report after that routes straight to "query
+PostHog like this" instead of rediscovering the codebase from scratch.
 
 **Full product vision (v2 — bisect over deploy history, repro compilation, blast radius):**
 [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md). This document is the plan for what we are
 actually building today.
 
 ```
-Slack (#bugs) → parse → [ agentic investigation loop ] → Linear ticket + Slack reply
-                              tools: PostHog, repo read/grep
+Slack (#bugs) → parse → [route or map] → [ agentic investigation loop ] → Linear + Slack
+                                                tools: PostHog, repo read/grep
+                                                    ↓ (if confident + approved in Slack)
+                                          [ implement agent ] → PR on GitHub
 ```
 
 ---
 
 ## 0. Status right now
 
-Scaffolding and the core loop are written and typecheck clean. **Nothing has been run against
-real Slack/PostHog/Linear yet** — no `.env` filled in, no demo app deployed. That's the next step.
+Core loop, LLM backend (OpenRouter/free Nemotron — see §8), bisect-skills routing, GitHub
+repo generalization, Block Kit Slack output, clean Linear formatting, Slack-approved
+auto-implement→PR, and a minimal local UI are all written and verified end-to-end against
+real Slack/PostHog/Linear/`acme-shop`.
 
 ```
 src/
-  types.ts              done — the 4 contracts + client interfaces
-  config.ts              done — env loading, model tiers, cost table, thresholds
+  types.ts               the contracts + client interfaces (RepoClient, GitHubClient, SkillBootstrap, …)
+  config.ts               env loading, model tiers, cost table, thresholds
   clients/
-    slack.ts              done — poll history, reply in thread (filters bot msgs)
-    posthog.ts             done — person lookup, HogQL query, event fetch, replay URL
-    repo.ts                done + smoke-tested — list/read/grep, path-traversal blocked
-    linear.ts              done — issueCreate (raw key auth, no "Bearer")
+    slack.ts               poll history, reply, Block Kit post, reaction polling (approval gate)
+    posthog.ts              person lookup, HogQL query, event fetch, replay URL
+    repo.ts                 list/read/grep/write, path-traversal blocked
+    linear.ts               issueCreate (raw key auth, no "Bearer")
+    github.ts                clone / branch / commit / push (git CLI) + PR open (REST)
+  repo/resolve.ts          GITHUB_REPO (clone) or REPO_PATH (local) — cached per process
+  skills/
+    first-time.md           bisect's own bootstrap instructions — lives HERE, never copied
+                             into a target repo (only skill.md + references/*.md are)
+    bootstrap.ts             CASE 1: discovery agent loop → SkillBootstrap
+    detect.ts                does bisect-skills/skill.md exist in the target repo?
+    apply.ts                 writes skill.md + references/*.md — as a PR if GitHub-backed,
+                             directly to disk if local REPO_PATH
   agent/
-    tools.ts               done — 8 tools, evidence-id bookkeeping
-    investigate.ts          done — the loop + post-hoc enforcement (see §5)
-  steps/parse.ts          done — Slack text → structured report
-  report/render.ts        done — Linear markdown + Slack reply text
-  index.ts               done — poll loop, --text dry-run mode, run recording to runs/
+    client.ts                shared OpenRouter/OpenAI-SDK client factory
+    tools.ts                 investigation tools, evidence-id bookkeeping, OpenAI tool adapter
+    investigate.ts            the loop + post-hoc enforcement (see §5) + skill.md injection
+    implement.ts              CASE: Slack-approved auto-fix agent → patch → PR
+  steps/parse.ts            Slack text → structured report
+  report/render.ts          Linear markdown (checklist + evidence table) + Slack Block Kit
+  ui/
+    server.ts                tiny Node http server, no framework
+    index.html                dashboard reading runs/*.json — list + detail view
+  index.ts                  poll loop, --text dry-run mode, run recording to runs/
 ```
 
-**Not started:** the demo app (`acme-shop`), Slack/PostHog/Linear accounts wired up,
-Slack Block Kit formatting, the benchmark harness, README/video.
+**Not yet live-tested:** the GitHub-clone + PR path (bootstrap-as-PR and auto-implement-as-PR)
+— both are implemented and typecheck clean, but need a real `GITHUB_TOKEN` with repo write
+scope to exercise; everything tested so far used the local-`REPO_PATH`-write fallback.
+**Not started:** the benchmark harness (§12 of IMPLEMENTATION_PLAN.md), README/video.
 
 ---
 

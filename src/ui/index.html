@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>bisect</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  :root {
+    --bg: #0b0e14; --panel: #11151d; --border: #1f2733; --text: #e6e9ef; --muted: #8590a6;
+    --diagnosed: #3fb950; --no_session: #d29922; --no_diagnosis: #d29922; --skipped: #6e7681;
+    --accent: #58a6ff;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.5 -apple-system, Segoe UI, sans-serif; }
+  header { padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 10px; }
+  header .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--diagnosed); }
+  header h1 { font-size: 16px; margin: 0; font-weight: 700; letter-spacing: 0.02em; }
+  header span { color: var(--muted); font-size: 12px; }
+  .layout { display: grid; grid-template-columns: 340px 1fr; height: calc(100vh - 57px); }
+  .list { border-right: 1px solid var(--border); overflow-y: auto; }
+  .row { padding: 12px 16px; border-bottom: 1px solid var(--border); cursor: pointer; }
+  .row:hover { background: var(--panel); }
+  .row.active { background: var(--panel); border-left: 3px solid var(--accent); }
+  .badge { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; }
+  .badge.DIAGNOSED { background: rgba(63,185,80,.15); color: var(--diagnosed); }
+  .badge.NO_SESSION, .badge.NO_DIAGNOSIS { background: rgba(210,153,34,.15); color: var(--no_session); }
+  .badge.SKIPPED { background: rgba(110,118,129,.15); color: var(--skipped); }
+  .row .symptom { margin-top: 6px; font-size: 13px; color: var(--text); }
+  .row .meta { margin-top: 4px; font-size: 11px; color: var(--muted); }
+  .detail { padding: 24px 32px; overflow-y: auto; }
+  .empty { color: var(--muted); padding: 40px; text-align: center; }
+  .detail h2 { margin: 0 0 4px; font-size: 20px; }
+  .stat-row { display: flex; gap: 24px; margin: 16px 0 24px; font-size: 12px; color: var(--muted); }
+  .stat-row b { color: var(--text); font-size: 14px; display: block; }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 16px 18px; margin-bottom: 16px; }
+  .card h3 { margin: 0 0 10px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
+  .card p { margin: 0; }
+  code, pre { font-family: ui-monospace, Consolas, monospace; }
+  pre { background: #05070b; border: 1px solid var(--border); border-radius: 6px; padding: 10px 12px; overflow-x: auto; font-size: 12px; line-height: 1.6; }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-weight: 600; }
+  .cited { color: var(--diagnosed); font-weight: 600; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .pill { display: inline-block; background: #0d2540; color: var(--accent); border-radius: 4px; padding: 1px 6px; font-size: 11px; margin-right: 4px; }
+</style>
+</head>
+<body>
+<header>
+  <div class="dot" id="live-dot"></div>
+  <h1>bisect</h1>
+  <span id="run-count">loading…</span>
+</header>
+<div class="layout">
+  <div class="list" id="list"></div>
+  <div class="detail" id="detail"><div class="empty">Select an investigation</div></div>
+</div>
+<script>
+const OUTCOME_LABEL = { DIAGNOSED: 'Diagnosed', NO_SESSION: 'Need info', NO_DIAGNOSIS: 'No diagnosis', SKIPPED: 'Skipped' };
+
+let runs = [];
+let activeId = null;
+
+async function refresh() {
+  const res = await fetch('/api/runs');
+  runs = await res.json();
+  document.getElementById('run-count').textContent = runs.length + ' investigation' + (runs.length === 1 ? '' : 's');
+  renderList();
+}
+
+function renderList() {
+  const el = document.getElementById('list');
+  if (runs.length === 0) {
+    el.innerHTML = '<div class="empty">No runs yet — investigate a bug and it will show up here.</div>';
+    return;
+  }
+  el.innerHTML = runs.map(r => `
+    <div class="row ${r.id === activeId ? 'active' : ''}" data-id="${r.id}">
+      <span class="badge ${r.outcome}">${OUTCOME_LABEL[r.outcome] ?? r.outcome}</span>
+      <div class="symptom">${escapeHtml(r.symptom)}</div>
+      <div class="meta">${new Date(r.started_at).toLocaleString()} · ${(r.duration_ms/1000).toFixed(1)}s · ${r.tool_calls} calls · $${r.cost_usd.toFixed(3)}</div>
+    </div>
+  `).join('');
+  el.querySelectorAll('.row').forEach(row => {
+    row.addEventListener('click', () => selectRun(row.dataset.id));
+  });
+}
+
+async function selectRun(id) {
+  activeId = id;
+  renderList();
+  const res = await fetch('/api/runs/' + id);
+  const inv = await res.json();
+  renderDetail(inv);
+}
+
+function timelineText(inv) {
+  let best = [];
+  for (const e of inv.evidence) {
+    if (e.source !== 'posthog' || !Array.isArray(e.data)) continue;
+    if (e.data[0]?.timestamp && e.data.length > best.length) best = e.data;
+  }
+  if (best.length === 0) return null;
+  return best.slice(0, 20).map(e => {
+    const time = (e.timestamp || '').slice(11, 19);
+    const path = e.url ? (() => { try { return new URL(e.url).pathname; } catch { return e.url; } })() : '';
+    const label = e.el_text ? ` "${e.el_text}"` : '';
+    return `${time}  ${(e.event || '').padEnd(14)} ${path}${label}`;
+  }).join('\n');
+}
+
+function renderDetail(inv) {
+  const d = inv.diagnosis;
+  const el = document.getElementById('detail');
+  const cited = new Set(d?.evidence_refs ?? []);
+  const timeline = timelineText(inv);
+
+  el.innerHTML = `
+    <span class="badge ${inv.outcome}">${OUTCOME_LABEL[inv.outcome] ?? inv.outcome}</span>
+    <h2>${escapeHtml(inv.report?.symptom ?? inv.slack.text)}</h2>
+    <div class="stat-row">
+      <div><b>${(inv.stats.duration_ms/1000).toFixed(1)}s</b>duration</div>
+      <div><b>${inv.stats.tool_calls}</b>tool calls</div>
+      <div><b>$${inv.stats.cost_usd.toFixed(3)}</b>cost</div>
+      ${d ? `<div><b>${d.confidence.toFixed(2)}</b>confidence</div>` : ''}
+    </div>
+
+    ${d ? `
+    <div class="card">
+      <h3>Diagnosis</h3>
+      <p><b>${escapeHtml(d.cause)}</b></p>
+      ${d.file ? `<p style="margin-top:8px"><span class="pill">${escapeHtml(d.file)}${d.lines ? ':' + d.lines[0] + '-' + d.lines[1] : ''}</span></p>` : ''}
+      <p style="margin-top:10px;color:var(--muted)">${escapeHtml(d.suggested_change)}</p>
+    </div>` : `
+    <div class="card">
+      <h3>Why no diagnosis</h3>
+      <p>${escapeHtml(inv.abstain_reason ?? 'The investigation did not reach a conclusion.')}</p>
+    </div>`}
+
+    ${inv.replay_url || inv.linear_url ? `
+    <div class="card">
+      <h3>Links</h3>
+      ${inv.replay_url ? `<p><a href="${inv.replay_url}" target="_blank">▶ Session replay</a></p>` : ''}
+      ${inv.linear_url ? `<p style="margin-top:6px"><a href="${inv.linear_url}" target="_blank">📋 Linear ticket</a></p>` : ''}
+    </div>` : ''}
+
+    ${timeline ? `
+    <div class="card">
+      <h3>What actually happened</h3>
+      <pre>${escapeHtml(timeline)}</pre>
+    </div>` : ''}
+
+    <div class="card">
+      <h3>Evidence${cited.size ? ' (green = cited in diagnosis)' : ''}</h3>
+      <table>
+        <tr><th>id</th><th>source</th><th>what</th></tr>
+        ${inv.evidence.map(e => `<tr class="${cited.has(e.id) ? 'cited' : ''}"><td>${e.id}</td><td>${e.source}</td><td>${escapeHtml(e.summary)}</td></tr>`).join('')}
+      </table>
+    </div>
+
+    <div class="card">
+      <h3>Investigation steps</h3>
+      <pre>${inv.steps.map(s => `${String(s.idx).padStart(2)}. ${s.tool.padEnd(26)} ${escapeHtml((s.summary||'').split('\\n')[0])}`).join('\n')}</pre>
+    </div>
+  `;
+}
+
+function escapeHtml(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+refresh();
+setInterval(refresh, 5000);
+</script>
+</body>
+</html>

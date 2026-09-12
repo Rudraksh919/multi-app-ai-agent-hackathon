@@ -1,6 +1,6 @@
-import OpenAI from 'openai';
-import { CONFIG, env } from '../config.js';
+import { CONFIG } from '../config.js';
 import type { ParsedReport } from '../types.js';
+import { llmClient } from '../agent/client.js';
 import { toOpenAITools, type ToolDef } from '../agent/tools.js';
 
 const TOOL: ToolDef = {
@@ -50,14 +50,7 @@ is_bug_report according to whether an actual product failure is being described.
 Always call record_report exactly once.`;
 
 export async function parseReport(text: string, now = new Date()): Promise<ParsedReport> {
-  const openai = new OpenAI({
-    apiKey: env.openrouterKey(),
-    baseURL: CONFIG.llm.baseURL,
-    defaultHeaders: {
-      'HTTP-Referer': 'https://github.com/Rudraksh919/multi-app-ai-agent-hackathon',
-      'X-Title': 'bisect',
-    },
-  });
+  const openai = llmClient();
 
   const res = await openai.chat.completions.create({
     model: CONFIG.models.triage,

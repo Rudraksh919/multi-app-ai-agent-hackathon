@@ -9,6 +9,7 @@
     "start": "tsx src/index.ts",
     "once": "tsx src/index.ts --once",
     "typecheck": "tsc --noEmit",
+    "ui": "tsx src/ui/server.ts",
     "bench": "tsx benchmark/run.ts"
   },
   "dependencies": {

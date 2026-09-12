@@ -1,5 +1,5 @@
-import { readFile, readdir, stat } from 'node:fs/promises';
-import { join, relative, resolve, sep } from 'node:path';
+import { mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises';
+import { dirname, join, relative, resolve, sep } from 'node:path';
 import type { RepoClient } from '../types.js';
 import { env } from '../config.js';
 
@@ -37,6 +37,21 @@ export function makeRepoClient(rootOverride?: string): RepoClient {
   const root = resolve(rootOverride ?? env.repoPath());
 
   return {
+    root() {
+      return root;
+    },
+
+    async readRaw(file) {
+      const target = safeJoin(root, file);
+      return readFile(target, 'utf8');
+    },
+
+    async write(file, content) {
+      const target = safeJoin(root, file);
+      await mkdir(dirname(target), { recursive: true });
+      await writeFile(target, content, 'utf8');
+    },
+
     async list(dir) {
       const target = safeJoin(root, dir || '.');
       const entries = await readdir(target, { withFileTypes: true });

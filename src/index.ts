@@ -3,11 +3,22 @@ import { join } from 'node:path';
 import { CONFIG, env } from './config.js';
 import { makeLinearClient } from './clients/linear.js';
 import { makePostHogClient } from './clients/posthog.js';
-import { makeRepoClient } from './clients/repo.js';
 import { makeSlackClient } from './clients/slack.js';
 import { investigate } from './agent/investigate.js';
+import { implementFix } from './agent/implement.js';
 import { parseReport } from './steps/parse.js';
-import { linearDescription, slackReply, title } from './report/render.js';
+import {
+  approvalBlocks,
+  implementResultBlocks,
+  linearDescription,
+  slackBlocks,
+  slackFallbackText,
+  title,
+} from './report/render.js';
+import { resolveRepo } from './repo/resolve.js';
+import { hasSkills, readSkillMd } from './skills/detect.js';
+import { runBootstrap } from './skills/bootstrap.js';
+import { applyBootstrap } from './skills/apply.js';
 import type { Investigation, PostHogEvent, SlackMessage } from './types.js';
 
 interface Options {
@@ -75,11 +86,35 @@ async function runOne(message: SlackMessage, opts: Options): Promise<Investigati
     await slack.reply(message.channel, message.ts, `🔍 Investigating: _${report.symptom}_`);
   }
 
+  // ── 1.5 Route or map ─────────────────────────────────────────────────
+  // CASE 1: bisect-skills/ doesn't exist yet — pay the "understand this codebase" cost
+  // once, in a dedicated pass, and persist it. CASE 2: it exists — read the small routing
+  // skill.md and hand it to the investigator instead of rediscovering services from scratch.
+  const { repo, github } = await resolveRepo();
+  let skillMd: string | null = null;
+
+  if (await hasSkills(repo)) {
+    skillMd = await readSkillMd(repo);
+  } else {
+    console.log('  no bisect-skills/ found — mapping this codebase once (first run)…');
+    const bootstrap = await runBootstrap(repo, (s) =>
+      console.log(`    map ${String(s.idx).padStart(2)}. ${s.tool.padEnd(16)} ${s.summary}`),
+    );
+    const applied = await applyBootstrap(repo, github, bootstrap);
+    skillMd = bootstrap.skill_md;
+    console.log(
+      applied.pr_url
+        ? `  bisect-skills/ opened as a PR: ${applied.pr_url} (using it for this run only until merged)`
+        : `  bisect-skills/ written locally: ${applied.files.join(', ')}`,
+    );
+  }
+
   // ── 2. Investigate ───────────────────────────────────────────────────
   const result = await investigate(
     report,
-    { posthog: makePostHogClient(), repo: makeRepoClient() },
+    { posthog: makePostHogClient(), repo },
     {
+      skillMd,
       onStep: (s) =>
         console.log(`  ${String(s.idx).padStart(2)}. ${s.tool.padEnd(26)} ${s.summary}`),
     },
@@ -120,7 +155,51 @@ async function runOne(message: SlackMessage, opts: Options): Promise<Investigati
     investigation.linear_url = issue.url;
     console.log(`  ticket  : ${issue.identifier} ${issue.url}`);
 
-    await slack.reply(message.channel, message.ts, slackReply(investigation));
+    await slack.postBlocks(
+      message.channel,
+      message.ts,
+      slackBlocks(investigation),
+      slackFallbackText(investigation),
+    );
+
+    // ── 4. Offer to implement ─────────────────────────────────────────
+    // Only above a real confidence bar — asking "should I write code?" on a shaky
+    // diagnosis is worse than just filing the ticket.
+    if (
+      investigation.outcome === 'DIAGNOSED' &&
+      investigation.diagnosis &&
+      investigation.diagnosis.confidence >= CONFIG.implement.minConfidence
+    ) {
+      const askTs = await slack.postBlocks(
+        message.channel,
+        message.ts,
+        approvalBlocks(investigation),
+        'Want bisect to implement this fix?',
+      );
+      const reaction = await slack.awaitReaction(
+        message.channel,
+        askTs,
+        ['white_check_mark', 'ticket'],
+        CONFIG.approval.timeoutMs,
+      );
+
+      if (reaction === 'white_check_mark') {
+        console.log('  approved — implementing fix…');
+        const implemented = await implementFix(investigation.diagnosis, repo, github);
+        console.log(
+          `  implement: ${implemented.filesChanged.join(', ') || '(no files changed)'}` +
+            (implemented.prUrl ? ` -> ${implemented.prUrl}` : ''),
+        );
+        await slack.postBlocks(
+          message.channel,
+          message.ts,
+          implementResultBlocks(implemented),
+          implemented.prUrl ? `Fix implemented: ${implemented.prUrl}` : 'Fix implemented locally',
+        );
+      } else {
+        console.log(`  auto-implement: ${reaction === 'ticket' ? 'declined (ticket only)' : 'timed out'}`);
+      }
+    }
   }
 
   console.log(
@@ -160,9 +239,13 @@ async function main(): Promise<void> {
   // Prime the cursor so we only react to messages sent after startup.
   const existing = await slack.fetchNew(null);
   lastSeen = existing.at(-1)?.ts ?? null;
+
+  // Warm the repo (clones GITHUB_REPO if configured) before the first message arrives,
+  // so the first investigation isn't the one paying clone latency.
+  const { slug } = await resolveRepo();
   console.log(
     `bisect listening on ${env.slackChannel()}${opts.dryRun ? ' (dry run)' : ''} — ` +
-      `repo: ${env.repoPath()}`,
+      `repo: ${slug ?? env.repoPath()}`,
   );
 
   for (;;) {

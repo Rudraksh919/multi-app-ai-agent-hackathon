@@ -108,7 +108,13 @@ export interface SlackClient {
   /** Messages newer than `oldest` (a Slack ts). Bot messages filtered out. */
   fetchNew(oldest: string | null): Promise<SlackMessage[]>;
   reply(channel: string, threadTs: string, text: string): Promise<void>;
-  postBlocks(channel: string, threadTs: string, blocks: unknown[], fallback: string): Promise<void>;
+  /** Returns the created message's ts, needed to poll reactions on it. */
+  postBlocks(channel: string, threadTs: string, blocks: unknown[], fallback: string): Promise<string>;
+  /**
+   * Poll a message's reactions until one of `emojis` appears, or timeoutMs elapses.
+   * Returns the emoji name that fired, or null on timeout.
+   */
+  awaitReaction(channel: string, ts: string, emojis: string[], timeoutMs: number): Promise<string | null>;
 }
 
 export interface PostHogPerson {
@@ -142,6 +148,38 @@ export interface RepoClient {
   read(file: string, fromLine?: number, toLine?: number): Promise<string>;
   /** ripgrep-style search. Returns "path:line: text" rows. */
   grep(pattern: string, glob?: string): Promise<string[]>;
+  /** Raw file contents, no line numbers — used for skill bootstrap and patches. */
+  readRaw(file: string): Promise<string>;
+  /** Create or overwrite a file. Creates parent directories as needed. */
+  write(file: string, content: string): Promise<void>;
+  /** Absolute path on disk this client is rooted at — needed for shelling out to git. */
+  root(): string;
+}
+
+export interface GitHubClient {
+  /** true if this repo has GitHub write access configured (a token + owner/repo). */
+  available(): boolean;
+  /** Create a branch, commit the given file writes, push, and open a PR. Returns the PR URL. */
+  commitAndOpenPr(input: {
+    branch: string;
+    title: string;
+    body: string;
+    files: { path: string; content: string }[];
+  }): Promise<string | null>;
+}
+
+// ─── bisect-skills/ — per-codebase routing so investigation doesn't rediscover
+// the same services from scratch on every bug report. See src/skills/.
+
+export interface SkillReference {
+  /** e.g. "posthog" -> bisect-skills/references/posthog.md */
+  name: string;
+  content: string;
+}
+
+export interface SkillBootstrap {
+  skill_md: string;
+  references: SkillReference[];
 }
 
 export interface LinearIssue {

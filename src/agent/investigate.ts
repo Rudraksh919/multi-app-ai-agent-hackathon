@@ -1,7 +1,7 @@
-import OpenAI from 'openai';
 import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions';
-import { CONFIG, costUsd, env } from '../config.js';
+import { CONFIG, costUsd } from '../config.js';
 import type { AgentStep, Diagnosis, Evidence, Outcome, ParsedReport } from '../types.js';
+import { llmClient } from './client.js';
 import { TOOLS, runTool, toOpenAITools, type ToolDeps } from './tools.js';
 
 const SYSTEM = `You are a debugging agent. A user reported a bug in a web application. Your job is
@@ -13,6 +13,10 @@ You have two sources of truth:
   - The repository: the source code of the application.
 
 How to work:
+  0. If a routing skill is provided below, it was written specifically for this codebase — it
+     names which services apply to which bug categories, in concrete terms (real event names,
+     real env vars). Follow it. Before ad-hoc PostHog exploration, use repo_read to open the
+     relevant bisect-skills/references/<name>.md file(s) it points you to.
   1. Find the user in PostHog and pull their events for the reported time window.
   2. Read the timeline. Look for where the user got stuck: a funnel they entered and never left,
      rage clicks, a repeated action, an error event, a page they never reached.
@@ -48,25 +52,14 @@ export interface InvestigationResult {
   usage: { input_tokens: number; output_tokens: number; cost_usd: number };
 }
 
-function client(): OpenAI {
-  return new OpenAI({
-    apiKey: env.openrouterKey(),
-    baseURL: CONFIG.llm.baseURL,
-    defaultHeaders: {
-      'HTTP-Referer': 'https://github.com/Rudraksh919/multi-app-ai-agent-hackathon',
-      'X-Title': 'bisect',
-    },
-  });
-}
-
 const OPENAI_TOOLS = toOpenAITools(TOOLS);
 
 export async function investigate(
   report: ParsedReport,
   deps: Omit<ToolDeps, 'evidence'>,
-  opts: { onStep?: (s: AgentStep) => void } = {},
+  opts: { onStep?: (s: AgentStep) => void; skillMd?: string | null } = {},
 ): Promise<InvestigationResult> {
-  const openai = client();
+  const openai = llmClient();
   const evidence: Evidence[] = [];
   const steps: AgentStep[] = [];
   const toolDeps: ToolDeps = { ...deps, evidence };
@@ -76,8 +69,12 @@ export async function investigate(
   let diagnosis: Diagnosis | null = null;
   let abstainReason: string | undefined;
 
+  const skillBlock = opts.skillMd
+    ? `\n\n<routing_skill>\n${opts.skillMd}\n</routing_skill>`
+    : '';
+
   const messages: ChatCompletionMessageParam[] = [
-    { role: 'system', content: SYSTEM },
+    { role: 'system', content: SYSTEM + skillBlock },
     {
       role: 'user',
       content: `A bug was reported.

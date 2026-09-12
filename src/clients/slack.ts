@@ -57,7 +57,29 @@ export function makeSlackClient(): SlackClient {
     },
 
     async postBlocks(channel, threadTs, blocks, fallback) {
-      await call('chat.postMessage', { channel, thread_ts: threadTs, blocks, text: fallback });
+      const res = await call<{ ts: string }>('chat.postMessage', {
+        channel,
+        thread_ts: threadTs,
+        blocks,
+        text: fallback,
+      });
+      return res.ts;
+    },
+
+    async awaitReaction(channel, ts, emojis, timeoutMs) {
+      const deadline = Date.now() + timeoutMs;
+      const wanted = new Set(emojis);
+
+      while (Date.now() < deadline) {
+        const res = await call<{ message?: { reactions?: { name: string }[] } }>(
+          'reactions.get',
+          { channel, timestamp: ts },
+        );
+        const hit = res.message?.reactions?.find((r) => wanted.has(r.name));
+        if (hit) return hit.name;
+        await new Promise((r) => setTimeout(r, 5_000));
+      }
+      return null;
     },
   };
 }
