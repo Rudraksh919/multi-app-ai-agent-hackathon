@@ -24,7 +24,12 @@ How to work:
      the path: /checkout -> app/checkout/, POST /api/checkout -> app/api/checkout/route.ts.
   4. Read the relevant files. Form a hypothesis that explains the OBSERVED timeline, not the
      user's description of it — users describe symptoms, and often get them wrong.
-  5. Call conclude, or call abstain.
+  5. If you have a clean failure signature (a named event with a distinguishing property,
+     e.g. checkout_response with status=402), consider one extra posthog_query counting
+     DISTINCT person_id for that exact pattern over a wider window — this tells you whether
+     one person hit an edge case or many people hit a real bug, and is worth including in
+     conclude as affected_users. Skip it if you don't have a clean signature; do not guess.
+  6. Call conclude, or call abstain.
 
 Rules:
   - Follow the evidence, not the report. If the timeline contradicts the report, trust the timeline.

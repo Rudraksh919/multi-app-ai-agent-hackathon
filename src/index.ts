@@ -25,6 +25,12 @@ interface Options {
   once: boolean;
   dryRun: boolean;
   text: string | null;
+  /**
+   * Dry-run only: skip the Slack approval wait and call implementFix() directly if the
+   * outcome is DIAGNOSED. This exercises the exact same implement/PR code path a live ✅
+   * reaction would, without depending on a human clicking a reaction during a test run.
+   */
+  autoImplement: boolean;
 }
 
 function parseArgs(argv: string[]): Options {
@@ -33,6 +39,7 @@ function parseArgs(argv: string[]): Options {
     once: argv.includes('--once'),
     dryRun: argv.includes('--dry-run'),
     text: textIdx >= 0 ? (argv[textIdx + 1] ?? null) : null,
+    autoImplement: argv.includes('--auto-implement'),
   };
 }
 
@@ -148,7 +155,8 @@ async function runOne(message: SlackMessage, opts: Options): Promise<Investigati
   if (opts.dryRun) {
     console.log(`\n${'─'.repeat(70)}\n${linearDescription(investigation)}\n`);
   } else {
-    const issue = await makeLinearClient().createIssue({
+    const linear = makeLinearClient();
+    const issue = await linear.createIssue({
       title: title(investigation),
       description: linearDescription(investigation),
     });
@@ -196,6 +204,14 @@ async function runOne(message: SlackMessage, opts: Options): Promise<Investigati
           implementResultBlocks(implemented),
           implemented.prUrl ? `Fix implemented: ${implemented.prUrl}` : 'Fix implemented locally',
         );
+
+        // Close the loop: the ticket should know a fix landed, not just Slack.
+        const commentBody = implemented.prUrl
+          ? `🔧 Fix implemented: ${implemented.prUrl}\n\n${implemented.summary}`
+          : `🔧 Fix applied locally (no GitHub write access configured): ${implemented.filesChanged.join(', ')}\n\n${implemented.summary}`;
+        await linear.addComment(issue.id, commentBody).catch((err) => {
+          console.error('  linear comment failed:', err instanceof Error ? err.message : err);
+        });
       } else {
         console.log(`  auto-implement: ${reaction === 'ticket' ? 'declined (ticket only)' : 'timed out'}`);
       }
@@ -226,10 +242,28 @@ async function main(): Promise<void> {
 
   // Ad-hoc mode: skip Slack entirely and investigate a string. The fast dev loop.
   if (opts.text) {
-    await runOne(
+    const investigation = await runOne(
       { channel: process.env.SLACK_CHANNEL_ID ?? 'local', ts: '0', user: 'local', text: opts.text },
       { ...opts, dryRun: true },
     );
+
+    if (opts.autoImplement) {
+      if (investigation.outcome !== 'DIAGNOSED' || !investigation.diagnosis) {
+        console.log(`\n--auto-implement: skipped — outcome was ${investigation.outcome}, not DIAGNOSED.`);
+      } else if (investigation.diagnosis.confidence < CONFIG.implement.minConfidence) {
+        console.log(
+          `\n--auto-implement: skipped — confidence ${investigation.diagnosis.confidence.toFixed(2)} ` +
+            `is below the ${CONFIG.implement.minConfidence} bar.`,
+        );
+      } else {
+        console.log(`\n${'─'.repeat(70)}\nimplementing fix (bypassing Slack approval for this dry run)…\n`);
+        const { repo, github } = await resolveRepo();
+        const implemented = await implementFix(investigation.diagnosis, repo, github);
+        console.log(`summary : ${implemented.summary}`);
+        console.log(`files   : ${implemented.filesChanged.join(', ') || '(none)'}`);
+        console.log(implemented.prUrl ? `PR      : ${implemented.prUrl}` : `PR      : (none — no GitHub write access configured; applied locally)`);
+      }
+    }
     return;
   }
 

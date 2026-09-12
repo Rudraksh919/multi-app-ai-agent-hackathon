@@ -62,6 +62,8 @@ export interface Diagnosis {
   suggested_change: string; // description, not a patch
   confidence: number; // 0..1
   evidence_refs: string[]; // REQUIRED non-empty, must resolve
+  /** How many OTHER users hit the same failure signature, if the agent could quantify it. */
+  affected_users: number | null;
 }
 
 // ─── Outcome ─────────────────────────────────────────────────────────────
@@ -191,4 +193,6 @@ export interface LinearIssue {
 export interface LinearClient {
   teamId(): Promise<string>;
   createIssue(input: { title: string; description: string }): Promise<LinearIssue>;
+  /** Closes the loop when a fix lands — links the PR (or the applied patch) back onto the ticket. */
+  addComment(issueId: string, body: string): Promise<void>;
 }

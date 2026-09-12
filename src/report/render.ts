@@ -62,21 +62,23 @@ export function linearDescription(inv: Investigation): string {
     `${OUTCOME_EMOJI[inv.outcome]} **${OUTCOME_LABEL[inv.outcome]}**`,
     d ? `Confidence \`${d.confidence.toFixed(2)}\`` : null,
     d?.file ? `\`${d.file}${d.lines ? `:${d.lines[0]}-${d.lines[1]}` : ''}\`` : null,
+    typeof d?.affected_users === 'number' ? `👥 ${d.affected_users} other user${d.affected_users === 1 ? '' : 's'} hit this` : null,
   ]
     .filter(Boolean)
     .join('  ·  ');
   parts.push(glance);
 
   if (inv.outcome === 'DIAGNOSED' && d) {
-    parts.push(
-      [
-        `## Diagnosis`,
-        `**${d.cause}**`,
-        '',
-        `- [ ] Review suggested change: ${d.suggested_change}`,
-        `- [ ] Confirm against replay${inv.replay_url ? ` — [watch](${inv.replay_url})` : ''}`,
-      ].join('\n'),
+    const diagLines = [`## Diagnosis`, `**${d.cause}**`];
+    if (typeof d.affected_users === 'number') {
+      diagLines.push(`👥 **${d.affected_users}** other user${d.affected_users === 1 ? '' : 's'} hit the same pattern.`);
+    }
+    diagLines.push(
+      '',
+      `- [ ] Review suggested change: ${d.suggested_change}`,
+      `- [ ] Confirm against replay${inv.replay_url ? ` — [watch](${inv.replay_url})` : ''}`,
     );
+    parts.push(diagLines.join('\n'));
   } else {
     parts.push(
       `## No diagnosis\n\n${inv.abstain_reason ?? 'The investigation did not reach a conclusion.'}\n\n` +
@@ -162,6 +164,12 @@ export function slackBlocks(inv: Investigation): Block[] {
     fields.push({
       type: 'mrkdwn',
       text: `*Location*\n\`${d.file}${d.lines ? `:${d.lines[0]}-${d.lines[1]}` : ''}\``,
+    });
+  }
+  if (typeof d?.affected_users === 'number') {
+    fields.push({
+      type: 'mrkdwn',
+      text: `*Affected*\n👥 ${d.affected_users} other user${d.affected_users === 1 ? '' : 's'}`,
     });
   }
   if (fields.length) blocks.push({ type: 'section', fields });

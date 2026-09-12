@@ -29,6 +29,22 @@ export function resolveRepo(): Promise<ResolvedRepo> {
   return cached;
 }
 
+/** Accepts "owner/repo", a full https URL, or a git@ URL — whatever someone pastes in. */
+function parseGithubRepo(raw: string): { owner: string; name: string } {
+  const cleaned = raw
+    .trim()
+    .replace(/^git@github\.com:/, '')
+    .replace(/^https?:\/\/(www\.)?github\.com\//, '')
+    .replace(/\.git$/, '')
+    .replace(/\/+$/, '');
+
+  const [owner, name] = cleaned.split('/');
+  if (!owner || !name) {
+    throw new Error(`GITHUB_REPO must be "owner/repo" or a GitHub URL, got: ${raw}`);
+  }
+  return { owner, name };
+}
+
 async function doResolve(): Promise<ResolvedRepo> {
   const githubRepo = env.githubRepo();
 
@@ -37,10 +53,7 @@ async function doResolve(): Promise<ResolvedRepo> {
     return { repo, github: makeGitHubClient(null, null, repo), slug: null };
   }
 
-  const [owner, name] = githubRepo.split('/');
-  if (!owner || !name) {
-    throw new Error(`GITHUB_REPO must be "owner/repo", got: ${githubRepo}`);
-  }
+  const { owner, name } = parseGithubRepo(githubRepo);
 
   const dir = await mktempDir();
   await cloneRepo(owner, name, dir, env.githubBranch());

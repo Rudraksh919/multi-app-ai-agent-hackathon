@@ -144,6 +144,16 @@ export const TOOLS: ToolDef[] = [
           items: { type: 'string' },
           description: 'ids of evidence supporting this, e.g. ["ph_02","file_01"]',
         },
+        affected_users: {
+          type: 'number',
+          description:
+            'Optional. If your evidence includes a specific failure signature (a named event ' +
+            "with a distinguishing property, e.g. checkout_response with status=402), you may " +
+            'run one extra posthog_query counting DISTINCT person_id for that exact pattern ' +
+            'across a wider window (e.g. the last 30 days) to see how many OTHER users hit the ' +
+            'same thing, not just the one who reported it. Omit if you have no clean signature ' +
+            'to count — do not guess a number.',
+        },
       },
       required: ['cause', 'suggested_change', 'confidence', 'evidence_refs'],
     },
@@ -330,6 +340,10 @@ export async function runTool(
         suggested_change: String(input.suggested_change),
         confidence: Number(input.confidence),
         evidence_refs: Array.isArray(input.evidence_refs) ? (input.evidence_refs as string[]) : [],
+        affected_users:
+          typeof input.affected_users === 'number' && Number.isFinite(input.affected_users)
+            ? Math.max(0, Math.round(input.affected_users))
+            : null,
       };
       return { text: 'Diagnosis recorded.', terminal: { kind: 'conclude', diagnosis } };
     }

@@ -27,6 +27,9 @@
   .badge.SKIPPED { background: rgba(110,118,129,.15); color: var(--skipped); }
   .row .symptom { margin-top: 6px; font-size: 13px; color: var(--text); }
   .row .meta { margin-top: 4px; font-size: 11px; color: var(--muted); }
+  .stats-bar { display: flex; gap: 28px; padding: 10px 20px; border-bottom: 1px solid var(--border); background: var(--panel); }
+  .stats-bar .chip { font-size: 12px; color: var(--muted); }
+  .stats-bar .chip b { color: var(--text); font-size: 15px; font-weight: 700; margin-right: 5px; }
   .detail { padding: 24px 32px; overflow-y: auto; }
   .empty { color: var(--muted); padding: 40px; text-align: center; }
   .detail h2 { margin: 0 0 4px; font-size: 20px; }
@@ -52,6 +55,7 @@
   <h1>bisect</h1>
   <span id="run-count">loading…</span>
 </header>
+<div class="stats-bar" id="stats-bar"></div>
 <div class="layout">
   <div class="list" id="list"></div>
   <div class="detail" id="detail"><div class="empty">Select an investigation</div></div>
@@ -66,7 +70,28 @@ async function refresh() {
   const res = await fetch('/api/runs');
   runs = await res.json();
   document.getElementById('run-count').textContent = runs.length + ' investigation' + (runs.length === 1 ? '' : 's');
+  renderStats();
   renderList();
+}
+
+function renderStats() {
+  const bar = document.getElementById('stats-bar');
+  if (runs.length === 0) { bar.innerHTML = ''; return; }
+
+  const diagnosed = runs.filter(r => r.outcome === 'DIAGNOSED').length;
+  const abstained = runs.filter(r => r.outcome === 'NO_SESSION' || r.outcome === 'NO_DIAGNOSIS').length;
+  const totalCost = runs.reduce((s, r) => s + r.cost_usd, 0);
+  const avgDuration = runs.reduce((s, r) => s + r.duration_ms, 0) / runs.length / 1000;
+  const confidences = runs.map(r => r.confidence).filter(c => typeof c === 'number');
+  const avgConfidence = confidences.length ? confidences.reduce((s, c) => s + c, 0) / confidences.length : null;
+
+  bar.innerHTML = `
+    <div class="chip"><b>${diagnosed}</b>diagnosed</div>
+    <div class="chip"><b>${abstained}</b>honest abstention${abstained === 1 ? '' : 's'}</div>
+    ${avgConfidence !== null ? `<div class="chip"><b>${avgConfidence.toFixed(2)}</b>avg confidence</div>` : ''}
+    <div class="chip"><b>${avgDuration.toFixed(1)}s</b>avg duration</div>
+    <div class="chip"><b>$${totalCost.toFixed(3)}</b>total cost</div>
+  `;
 }
 
 function renderList() {
@@ -124,6 +149,7 @@ function renderDetail(inv) {
       <div><b>${inv.stats.tool_calls}</b>tool calls</div>
       <div><b>$${inv.stats.cost_usd.toFixed(3)}</b>cost</div>
       ${d ? `<div><b>${d.confidence.toFixed(2)}</b>confidence</div>` : ''}
+      ${d && typeof d.affected_users === 'number' ? `<div><b>👥 ${d.affected_users}</b>other users</div>` : ''}
     </div>
 
     ${d ? `

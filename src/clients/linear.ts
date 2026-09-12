@@ -54,5 +54,17 @@ export function makeLinearClient(): LinearClient {
       }
       return data.issueCreate.issue;
     },
+
+    async addComment(issueId, body) {
+      const data = await gql<{ commentCreate: { success: boolean } }>(
+        `mutation Comment($input: CommentCreateInput!) {
+           commentCreate(input: $input) { success }
+         }`,
+        { input: { issueId, body } },
+      );
+      if (!data.commentCreate.success) {
+        throw new Error('Linear commentCreate returned success=false');
+      }
+    },
   };
 }
