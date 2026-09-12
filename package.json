@@ -1,0 +1,23 @@
+{
+  "name": "bisect",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "An agent that investigates bug reports using real user sessions, not guesses.",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "once": "tsx src/index.ts --once",
+    "typecheck": "tsc --noEmit",
+    "bench": "tsx benchmark/run.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.71.0",
+    "dotenv": "^17.2.3"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "tsx": "^4.21.1",
+    "typescript": "^5.9.3"
+  }
+}
