@@ -44,6 +44,8 @@ export const env = {
   posthogKey: () => required('POSTHOG_API_KEY'),
   posthogProject: () => required('POSTHOG_PROJECT_ID'),
   posthogHost: () => optional('POSTHOG_HOST', 'https://us.posthog.com').replace(/\/$/, ''),
+  /** Optional deployed app URL used to keep PostHog evidence separate from localhost traffic. */
+  targetAppUrl: () => process.env.TARGET_APP_URL || null,
 
   linearKey: () => required('LINEAR_API_KEY'),
   linearTeam: () => process.env.LINEAR_TEAM_ID || null,

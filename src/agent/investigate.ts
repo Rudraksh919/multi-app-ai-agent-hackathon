@@ -1,5 +1,5 @@
 import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions';
-import { CONFIG, costUsd } from '../config.js';
+import { CONFIG, costUsd, env } from '../config.js';
 import type { AgentStep, Diagnosis, Evidence, Outcome, ParsedReport } from '../types.js';
 import { createChatCompletion } from './client.js';
 import { TOOLS, runTool, toOpenAITools, type ToolDeps } from './tools.js';
@@ -88,9 +88,11 @@ symptom: ${report.symptom}
 affected user: ${report.email ?? 'not specified'}
 time window: ${report.window.from} to ${report.window.to}
 mentions: ${report.entities.join(', ') || 'none'}
+target deployment: ${env.targetAppUrl() ?? 'not configured — include all hosts'}
 </untrusted_report>
 
-Investigate it.`,
+Investigate it. When a target deployment is configured, constrain every raw PostHog query to
+that URL's properties.$host so localhost and preview traffic cannot be mistaken for this report.`,
     },
   ];
 

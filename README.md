@@ -173,6 +173,10 @@ For a zero-cost local fallback, install Ollama, pull a tool-capable model such a
 `http://localhost:11434/v1`. Bisect tries Ollama only after every configured OpenRouter key
 fails, and temporarily skips keys that report an exhausted daily free quota.
 
+Set `TARGET_APP_URL` to the deployed app being investigated (for example,
+`https://your-app.vercel.app`). PostHog person and session queries are then restricted to that
+host, keeping local development events from being mixed into deployed bug reports.
+
 Two things worth knowing before you point this at a *different* repo than whatever you tested
 with first:
 - **GitHub write access is one App/token for however many repos you configure `GITHUB_REPO`

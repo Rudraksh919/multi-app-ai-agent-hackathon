@@ -50,6 +50,18 @@ function rowToEvent(row: unknown[]): PostHogEvent {
 
 export function makePostHogClient(): PostHogClient {
   const project = env.posthogProject();
+  const targetUrl = env.targetAppUrl();
+  let targetHost: string | null = null;
+
+  if (targetUrl) {
+    try {
+      targetHost = new URL(targetUrl).host;
+    } catch {
+      throw new Error(`TARGET_APP_URL must be a full URL, received: ${targetUrl}`);
+    }
+  }
+
+  const targetHostClause = targetHost ? `AND properties.$host = ${lit(targetHost)}` : '';
 
   const client: PostHogClient = {
     async findPerson(email) {
@@ -77,6 +89,7 @@ export function makePostHogClient(): PostHogClient {
          WHERE distinct_id = ${lit(distinctId)}
            AND timestamp >= ${lit(from)}
            AND timestamp <= ${lit(to)}
+           ${targetHostClause}
          ORDER BY timestamp ASC
          LIMIT ${CONFIG.posthog.eventLimit}`,
       );
@@ -88,6 +101,7 @@ export function makePostHogClient(): PostHogClient {
         `SELECT ${EVENT_COLS}
          FROM events
          WHERE properties.$session_id = ${lit(sessionId)}
+           ${targetHostClause}
          ORDER BY timestamp ASC
          LIMIT ${CONFIG.posthog.eventLimit}`,
       );
