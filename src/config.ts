@@ -114,7 +114,7 @@ export const CONFIG = {
 
   agent: {
     /** Hard ceiling on tool calls. Exhausting it is an abstention, not a failure. */
-    maxSteps: 20,
+    maxSteps: 25,
     maxTokens: 8000,
   },
 
