@@ -30,6 +30,14 @@ export const env = {
     return [required('OPENROUTER_API_KEY')];
   },
 
+  /**
+   * Optional local fallback. Ollama exposes an OpenAI-compatible endpoint, so the same
+   * tool-calling agent requests can be retried locally after every OpenRouter key fails.
+   * Leaving OLLAMA_MODEL unset disables the fallback.
+   */
+  ollamaModel: () => process.env.OLLAMA_MODEL || null,
+  ollamaBaseUrl: () => optional('OLLAMA_BASE_URL', 'http://localhost:11434/v1').replace(/\/$/, ''),
+
   slackToken: () => required('SLACK_BOT_TOKEN'),
   slackChannel: () => required('SLACK_CHANNEL_ID'),
 

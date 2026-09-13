@@ -41,7 +41,7 @@ PostHog/Sentry project.
 | **GitHub** | Repo cloning, PR diffs, PR comments, branch/commit/push for auto-fix PRs — and a real **GitHub App** (not a personal token), registered via GitHub's manifest flow with one click, so every automated action shows up as its own bot identity instead of a human's account. |
 | **Stripe** | Wired into the test-fixture app (`acme-shop`) as a genuine test-mode payment integration, so there's a real `PaymentIntent` and real decline codes to reason about instead of a fake gateway that just checks if a string ends in `0000`. |
 | **Vercel** | Where the test-fixture app is actually deployed — used to validate the full pipeline (bisect *and* pr-manager) against a live, production-shaped target, not just a local dev server. |
-| **OpenRouter** | The LLM backend for every agent call (free-tier Nemotron models), with automatic multi-key failover — free-tier rate limits are common enough that this mattered in practice, not just in theory. |
+| **OpenRouter / Ollama** | OpenRouter is tried first for every agent call, with automatic multi-key failover. If all remote keys fail, an optional local Ollama model can finish the same tool-calling loop without API cost. |
 
 ## Demo link
 
@@ -168,6 +168,11 @@ machine. Re-run it anytime; blank answers are skipped, so it's safe to fill in t
 Prefer editing `.env` by hand instead? `.env.example` documents every variable with the same
 "where to get it" detail the wizard prints.
 
+For a zero-cost local fallback, install Ollama, pull a tool-capable model such as
+`ollama pull qwen3:4b`, and set `OLLAMA_MODEL=qwen3:4b`. `OLLAMA_BASE_URL` defaults to
+`http://localhost:11434/v1`. Bisect tries Ollama only after every configured OpenRouter key
+fails, and temporarily skips keys that report an exhausted daily free quota.
+
 Two things worth knowing before you point this at a *different* repo than whatever you tested
 with first:
 - **GitHub write access is one App/token for however many repos you configure `GITHUB_REPO`
@@ -242,7 +247,7 @@ src/
     apply.ts                 writes skill.md + references/*.md — as a PR if GitHub-backed,
                              directly to disk if local REPO_PATH
   agent/
-    client.ts                shared OpenRouter client + multi-key failover (OPENROUTER_API_KEYS)
+    client.ts                OpenRouter multi-key failover, then optional local Ollama fallback
     tools.ts                 investigation tools, evidence-id bookkeeping, OpenAI tool adapter
     investigate.ts            the loop + post-hoc enforcement + skill.md injection
     implement.ts              Slack-approved auto-fix agent → patch → PR
