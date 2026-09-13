@@ -1,7 +1,7 @@
 import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions';
 import { CONFIG } from '../config.js';
 import type { Diagnosis, GitHubClient, RepoClient } from '../types.js';
-import { llmClient } from './client.js';
+import { createChatCompletion } from './client.js';
 import { toOpenAITools, type ToolDef } from './tools.js';
 
 const TOOLS: ToolDef[] = [
@@ -54,7 +54,6 @@ export async function implementFix(
   repo: RepoClient,
   github: GitHubClient,
 ): Promise<ImplementResult> {
-  const openai = llmClient();
   const written = new Map<string, string>();
 
   const messages: ChatCompletionMessageParam[] = [
@@ -74,14 +73,14 @@ Implement this fix.`,
   let summary = '';
 
   for (let i = 0; i < CONFIG.implement.maxSteps; i++) {
-    const res = await openai.chat.completions.create({
+    const { res } = await createChatCompletion({
       model: CONFIG.models.implement,
       max_tokens: CONFIG.agent.maxTokens,
       messages,
       tools: OPENAI_TOOLS,
     });
 
-    const message = res.choices?.[0]?.message;
+    const message = res?.choices?.[0]?.message;
     if (!message) break;
     messages.push({ role: 'assistant', content: message.content ?? null, tool_calls: message.tool_calls });
 

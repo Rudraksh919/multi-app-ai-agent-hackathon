@@ -11,7 +11,24 @@ function optional(name: string, fallback: string): string {
 }
 
 export const env = {
-  openrouterKey: () => required('OPENROUTER_API_KEY'),
+  /**
+   * One or more OpenRouter keys, tried in order on every LLM call — see
+   * src/agent/client.ts:createChatCompletion(). Free-tier "service temporarily overloaded"
+   * errors are common and per-key, so a second/third key (different accounts) often just
+   * works when the first doesn't. OPENROUTER_API_KEYS is comma-separated and takes priority;
+   * falls back to the single OPENROUTER_API_KEY for backward compatibility.
+   */
+  openrouterKeys: (): string[] => {
+    const multi = process.env.OPENROUTER_API_KEYS;
+    if (multi) {
+      const keys = multi
+        .split(',')
+        .map((k) => k.trim())
+        .filter(Boolean);
+      if (keys.length > 0) return keys;
+    }
+    return [required('OPENROUTER_API_KEY')];
+  },
 
   slackToken: () => required('SLACK_BOT_TOKEN'),
   slackChannel: () => required('SLACK_CHANNEL_ID'),

@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions';
 import { CONFIG } from '../config.js';
 import type { RepoClient, SkillBootstrap, SkillReference } from '../types.js';
-import { llmClient } from '../agent/client.js';
+import { createChatCompletion } from '../agent/client.js';
 import { toOpenAITools, type ToolDef } from '../agent/tools.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -78,7 +78,6 @@ export async function runBootstrap(
   repo: RepoClient,
   onStep?: (s: BootstrapStep) => void,
 ): Promise<SkillBootstrap> {
-  const openai = llmClient();
   const messages: ChatCompletionMessageParam[] = [
     { role: 'system', content: await firstTimeMd() },
     { role: 'user', content: 'Map this codebase and produce the bisect-skills/ content.' },
@@ -88,14 +87,14 @@ export async function runBootstrap(
   let stepIdx = 0;
 
   for (let i = 0; i < CONFIG.skills.maxSteps; i++) {
-    const res = await openai.chat.completions.create({
+    const { res } = await createChatCompletion({
       model: CONFIG.models.bootstrap,
       max_tokens: CONFIG.agent.maxTokens,
       messages,
       tools: OPENAI_TOOLS,
     });
 
-    const message = res.choices?.[0]?.message;
+    const message = res?.choices?.[0]?.message;
     if (!message) break;
 
     messages.push({ role: 'assistant', content: message.content ?? null, tool_calls: message.tool_calls });

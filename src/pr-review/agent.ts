@@ -1,7 +1,7 @@
 import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions';
 import { CONFIG, costUsd } from '../config.js';
 import { toOpenAITools } from '../agent/tools.js';
-import { llmClient } from '../agent/client.js';
+import { createChatCompletion } from '../agent/client.js';
 import type { ReviewEvidence, ReviewResult, ReviewStep } from './types.js';
 import { REVIEW_TOOLS, runReviewTool, type ReviewToolDeps } from './tools.js';
 
@@ -60,7 +60,6 @@ export async function reviewPr(
   deps: Omit<ReviewToolDeps, 'evidence'>,
   onStep?: (s: ReviewStep) => void,
 ): Promise<ReviewRunResult> {
-  const openai = llmClient();
   const evidence: ReviewEvidence[] = [
     { id: 'diff', kind: 'diff', summary: 'The PR diff', data: context.diffText },
   ];
@@ -99,22 +98,15 @@ relative to that root. Test this PR.`,
   ];
 
   for (let i = 0; i < CONFIG.prReview.maxSteps; i++) {
-    let res;
-    try {
-      res = await openai.chat.completions.create({
-        model: CONFIG.models.prReview,
-        max_tokens: CONFIG.prReview.maxTokens,
-        messages,
-        tools: OPENAI_TOOLS,
-      });
-    } catch (err) {
-      providerFailure = err instanceof Error ? err.message : String(err);
-      break;
-    }
+    const { res, error } = await createChatCompletion({
+      model: CONFIG.models.prReview,
+      max_tokens: CONFIG.prReview.maxTokens,
+      messages,
+      tools: OPENAI_TOOLS,
+    });
 
-    if (!res.choices || res.choices.length === 0) {
-      const raw = res as unknown as { error?: { message?: string } };
-      providerFailure = raw.error?.message ?? 'LLM provider returned no choices (likely a transient free-tier error).';
+    if (!res) {
+      providerFailure = error;
       break;
     }
 

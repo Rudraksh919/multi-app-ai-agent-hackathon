@@ -1,6 +1,6 @@
 import { CONFIG } from '../config.js';
 import type { ParsedReport } from '../types.js';
-import { llmClient } from '../agent/client.js';
+import { createChatCompletion } from '../agent/client.js';
 import { toOpenAITools, type ToolDef } from '../agent/tools.js';
 
 const TOOL: ToolDef = {
@@ -50,37 +50,25 @@ is_bug_report according to whether an actual product failure is being described.
 Always call record_report exactly once.`;
 
 export async function parseReport(text: string, now = new Date()): Promise<ParsedReport> {
-  const openai = llmClient();
+  // createChatCompletion already rotates through every configured OpenRouter key on a
+  // transient failure (including the "200 with no choices" shape free-tier models return
+  // when overloaded), so a single call here already has the retry built in.
+  const { res, error } = await createChatCompletion({
+    model: CONFIG.models.triage,
+    max_tokens: 1024,
+    messages: [
+      { role: 'system', content: SYSTEM },
+      { role: 'user', content: `<slack_message>\n${text}\n</slack_message>` },
+    ],
+    tools: toOpenAITools([TOOL]),
+    tool_choice: { type: 'function', function: { name: 'record_report' } },
+  });
 
-  // Free-tier OpenRouter models occasionally return a 200 with no `choices` (an error body
-  // shaped like a success) instead of throwing — one retry absorbs that transient case
-  // rather than crashing the whole investigation over a single triage hiccup.
-  let call: { type: 'function'; function: { name: string; arguments: string } } | undefined;
-  let lastError = '';
-
-  for (let attempt = 0; attempt < 2 && !call; attempt++) {
-    const res = await openai.chat.completions.create({
-      model: CONFIG.models.triage,
-      max_tokens: 1024,
-      messages: [
-        { role: 'system', content: SYSTEM },
-        { role: 'user', content: `<slack_message>\n${text}\n</slack_message>` },
-      ],
-      tools: toOpenAITools([TOOL]),
-      tool_choice: { type: 'function', function: { name: 'record_report' } },
-    });
-
-    const found = res.choices?.[0]?.message.tool_calls?.[0];
-    if (found?.type === 'function') {
-      call = found;
-    } else {
-      const raw = res as unknown as { error?: { message?: string } };
-      lastError = raw.error?.message ?? 'no tool call in response';
-    }
-  }
+  const found = res?.choices?.[0]?.message.tool_calls?.[0];
+  const call = found?.type === 'function' ? found : undefined;
 
   if (!call) {
-    throw new Error(`Triage model did not call record_report after retry: ${lastError}`);
+    throw new Error(`Triage model did not call record_report: ${error ?? 'no tool call in response'}`);
   }
 
   let input: Record<string, unknown>;

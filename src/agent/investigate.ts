@@ -1,7 +1,7 @@
 import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions';
 import { CONFIG, costUsd } from '../config.js';
 import type { AgentStep, Diagnosis, Evidence, Outcome, ParsedReport } from '../types.js';
-import { llmClient } from './client.js';
+import { createChatCompletion } from './client.js';
 import { TOOLS, runTool, toOpenAITools, type ToolDeps } from './tools.js';
 
 const SYSTEM = `You are a debugging agent. A user reported a bug in a web application. Your job is
@@ -64,7 +64,6 @@ export async function investigate(
   deps: Omit<ToolDeps, 'evidence'>,
   opts: { onStep?: (s: AgentStep) => void; skillMd?: string | null } = {},
 ): Promise<InvestigationResult> {
-  const openai = llmClient();
   const evidence: Evidence[] = [];
   const steps: AgentStep[] = [];
   const toolDeps: ToolDeps = { ...deps, evidence };
@@ -98,25 +97,18 @@ Investigate it.`,
   let providerFailure: string | undefined;
 
   for (let i = 0; i < CONFIG.agent.maxSteps; i++) {
-    let res;
-    try {
-      res = await openai.chat.completions.create({
-        model: CONFIG.models.investigate,
-        max_tokens: CONFIG.agent.maxTokens,
-        messages,
-        tools: OPENAI_TOOLS,
-      });
-    } catch (err) {
-      providerFailure = err instanceof Error ? err.message : String(err);
-      break;
-    }
+    // createChatCompletion already rotates through every configured OpenRouter key on
+    // failure (including the "200 with an error body" shape free-tier models return when
+    // overloaded) — a plain null result here means every key failed, not just this one.
+    const { res, error } = await createChatCompletion({
+      model: CONFIG.models.investigate,
+      max_tokens: CONFIG.agent.maxTokens,
+      messages,
+      tools: OPENAI_TOOLS,
+    });
 
-    // Free-tier OpenRouter models occasionally return a 200 with an error body
-    // instead of throwing — treat a missing `choices` array the same as a
-    // provider failure rather than crashing the whole investigation.
-    if (!res.choices || res.choices.length === 0) {
-      const raw = res as unknown as { error?: { message?: string } };
-      providerFailure = raw.error?.message ?? 'LLM provider returned no choices (likely a transient free-tier error).';
+    if (!res) {
+      providerFailure = error;
       break;
     }
 
