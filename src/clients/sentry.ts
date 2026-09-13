@@ -100,9 +100,10 @@ export function makeSentryClient(): SentryClient {
 
   async function searchIssues(query: string): Promise<SentryIssue[]> {
     if (!org || !project) throw new Error('Sentry is not configured (SENTRY_ORG/SENTRY_PROJECT unset).');
-    const raw = await api<RawIssue[]>(
-      `/projects/${org}/${project}/issues/?query=${encodeURIComponent(query)}&statsPeriod=90d`,
-    );
+    // No statsPeriod: this endpoint only accepts a small enum of values (24h, 14d, ...) and
+    // "90d" 400s — omitting it lets Sentry use its own default rather than guessing at the
+    // accepted set.
+    const raw = await api<RawIssue[]>(`/projects/${org}/${project}/issues/?query=${encodeURIComponent(query)}`);
     return raw.map(rowToIssue);
   }
 

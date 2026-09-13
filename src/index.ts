@@ -16,7 +16,7 @@ import {
   slackFallbackText,
   title,
 } from './report/render.js';
-import { resolveRepo } from './repo/resolve.js';
+import { resolveRepo, invalidateRepoCache } from './repo/resolve.js';
 import { hasSkills, readSkillMd } from './skills/detect.js';
 import { runBootstrap } from './skills/bootstrap.js';
 import { applyBootstrap } from './skills/apply.js';
@@ -100,6 +100,12 @@ async function runOne(message: SlackMessage, opts: Options): Promise<Investigati
   // skill.md and hand it to the investigator instead of rediscovering services from scratch.
   const { repo, github } = await resolveRepo();
   let skillMd: string | null = null;
+  // commitAndOpenPr() (inside applyBootstrap, below) leaves the clone checked out on the
+  // bootstrap's own branch rather than the repo's default branch — set once bootstrap runs,
+  // and acted on at the very end of this function, AFTER everything below that still reads
+  // from `repo`/`github` (investigate, implementFix) has finished with them. Invalidating
+  // immediately here would delete the directory those later steps are still using.
+  let didBootstrap = false;
 
   if (await hasSkills(repo)) {
     skillMd = await readSkillMd(repo);
@@ -115,6 +121,7 @@ async function runOne(message: SlackMessage, opts: Options): Promise<Investigati
         ? `  bisect-skills/ opened as a PR: ${applied.pr_url} (using it for this run only until merged)`
         : `  bisect-skills/ written locally: ${applied.files.join(', ')}`,
     );
+    didBootstrap = true;
   }
 
   // ── 2. Investigate ───────────────────────────────────────────────────
@@ -226,6 +233,10 @@ async function runOne(message: SlackMessage, opts: Options): Promise<Investigati
   );
 
   await record(investigation);
+
+  // Now safe — every use of `repo`/`github` above (investigate, implementFix) is done.
+  if (didBootstrap) await invalidateRepoCache();
+
   return investigation;
 }
 
