@@ -66,5 +66,17 @@ export function makeLinearClient(): LinearClient {
         throw new Error('Linear commentCreate returned success=false');
       }
     },
+
+    async getIssue(identifier) {
+      // Linear's `issue` query accepts either the UUID or the human identifier (e.g. "AGE-59").
+      try {
+        const data = await gql<{
+          issue: { id: string; identifier: string; title: string; description: string | null; url: string } | null;
+        }>(`query($id: String!) { issue(id: $id) { id identifier title description url } }`, { id: identifier });
+        return data.issue;
+      } catch {
+        return null;
+      }
+    },
   };
 }

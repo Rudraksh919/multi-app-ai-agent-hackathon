@@ -10,11 +10,15 @@
     "once": "tsx src/index.ts --once",
     "typecheck": "tsc --noEmit",
     "ui": "tsx src/ui/server.ts",
-    "bench": "tsx benchmark/run.ts"
+    "bench": "tsx benchmark/run.ts",
+    "review": "tsx src/pr-review/server.ts",
+    "review:pr": "tsx src/pr-review/server.ts --pr",
+    "setup:github-app": "tsx src/pr-review/setupGithubApp.ts"
   },
   "dependencies": {
     "dotenv": "^17.2.3",
-    "openai": "^6.9.1"
+    "openai": "^6.9.1",
+    "playwright": "^1.49.0"
   },
   "devDependencies": {
     "@types/node": "^24.10.1",

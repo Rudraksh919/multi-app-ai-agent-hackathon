@@ -32,6 +32,20 @@ export const env = {
   githubRepo: () => process.env.GITHUB_REPO || null, // "owner/repo"
   githubBranch: () => process.env.GITHUB_BASE_BRANCH || null, // null = repo default
   githubToken: () => process.env.GITHUB_TOKEN || null,
+
+  /** HMAC secret configured on the GitHub webhook (Settings -> Webhooks). Required to trust a payload. */
+  githubWebhookSecret: () => process.env.GITHUB_WEBHOOK_SECRET || null,
+  prReviewPort: () => Number(optional('PR_REVIEW_PORT', '4322')),
+
+  /**
+   * GitHub App identity — when all three are set, API calls (comments, reactions, clones)
+   * authenticate as the App's own installation token instead of a personal token, so they
+   * show up as "bisect[bot]" rather than whichever human's PAT is in GITHUB_TOKEN. Falls
+   * back to GITHUB_TOKEN when unset. See src/pr-review/setupGithubApp.ts.
+   */
+  githubAppId: () => process.env.GITHUB_APP_ID || null,
+  githubAppPrivateKeyPath: () => process.env.GITHUB_APP_PRIVATE_KEY_PATH || null,
+  githubAppInstallationId: () => process.env.GITHUB_APP_INSTALLATION_ID || null,
 };
 
 export const CONFIG = {
@@ -49,6 +63,8 @@ export const CONFIG = {
     bootstrap: 'nvidia/nemotron-3-super-120b-a12b:free',
     /** Writing an actual code patch. Same tier as investigate. */
     implement: 'nvidia/nemotron-3-super-120b-a12b:free',
+    /** Driving the PR-review sandbox — reasoning over a diff plus live HTTP/browser output. */
+    prReview: 'nvidia/nemotron-3-super-120b-a12b:free',
   },
 
   /**
@@ -105,6 +121,19 @@ export const CONFIG = {
 
   /** Every run is written to runs/<id>.json for --replay and the benchmark. */
   runsDir: 'runs',
+
+  prReview: {
+    /** Hard ceiling on tool calls (http/browser actions) per PR review. */
+    maxSteps: 20,
+    maxTokens: 8000,
+    /** How long to wait for `npm install && npm run dev` to answer HTTP before giving up. */
+    sandboxReadyTimeoutMs: 90_000,
+    npmInstallTimeoutMs: 5 * 60_000,
+    port: env.prReviewPort(),
+  },
+
+  /** Every PR review is written to pr-reviews/<id>.json, same idea as runsDir. */
+  prReviewsDir: 'pr-reviews',
 } as const;
 
 export function costUsd(model: string, inputTokens: number, outputTokens: number): number {

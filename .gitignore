@@ -1,5 +1,7 @@
 node_modules/
 .env
 runs/
+pr-reviews/
+*.pem
 *.log
 dist/
