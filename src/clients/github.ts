@@ -45,6 +45,60 @@ export async function cloneRepo(
   return destDir;
 }
 
+async function ghApi<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(`https://api.github.com${path}`, {
+    ...init,
+    headers: {
+      Authorization: `Bearer ${env.githubToken()}`,
+      Accept: 'application/vnd.github+json',
+      ...(init?.body ? { 'Content-Type': 'application/json' } : {}),
+      ...init?.headers,
+    },
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`GitHub ${path} -> ${res.status}: ${text.slice(0, 400)}`);
+  }
+  return res.json() as Promise<T>;
+}
+
+export interface GitHubPrFile {
+  filename: string;
+  status: string;
+  additions: number;
+  deletions: number;
+  patch?: string;
+}
+
+export interface GitHubPrDetail {
+  number: number;
+  title: string;
+  body: string | null;
+  html_url: string;
+  base: { ref: string; repo: { full_name: string } };
+  /** null when the head branch/fork was deleted after the PR was opened. */
+  head: { ref: string; sha: string; repo: { full_name: string; owner: { login: string }; name: string } | null };
+}
+
+/** The PR's own metadata — used by the one-shot `--pr` CLI path, where a webhook payload isn't available. */
+export async function getPr(owner: string, repo: string, prNumber: number): Promise<GitHubPrDetail> {
+  return ghApi<GitHubPrDetail>(`/repos/${owner}/${repo}/pulls/${prNumber}`);
+}
+
+/** The changed files with unified-diff patches — the review agent's "what changed" context. */
+export async function getPrFiles(owner: string, repo: string, prNumber: number): Promise<GitHubPrFile[]> {
+  return ghApi<GitHubPrFile[]>(`/repos/${owner}/${repo}/pulls/${prNumber}/files?per_page=100`);
+}
+
+/** Post the review verdict as a normal issue comment on the PR. Returns the comment's URL. */
+export async function postPrComment(owner: string, repo: string, prNumber: number, body: string): Promise<string> {
+  const json = await ghApi<{ html_url: string }>(`/repos/${owner}/${repo}/issues/${prNumber}/comments`, {
+    method: 'POST',
+    body: JSON.stringify({ body }),
+  });
+  return json.html_url;
+}
+
 async function defaultBranch(cwd: string): Promise<string> {
   try {
     const ref = await git(['symbolic-ref', 'refs/remotes/origin/HEAD'], cwd);

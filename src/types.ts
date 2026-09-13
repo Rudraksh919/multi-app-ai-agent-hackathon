@@ -190,9 +190,16 @@ export interface LinearIssue {
   url: string;
 }
 
+export interface LinearIssueDetail extends LinearIssue {
+  title: string;
+  description: string | null;
+}
+
 export interface LinearClient {
   teamId(): Promise<string>;
   createIssue(input: { title: string; description: string }): Promise<LinearIssue>;
   /** Closes the loop when a fix lands — links the PR (or the applied patch) back onto the ticket. */
   addComment(issueId: string, body: string): Promise<void>;
+  /** Look up a ticket by its human identifier (e.g. "AGE-59"). Null if not found. */
+  getIssue(identifier: string): Promise<LinearIssueDetail | null>;
 }

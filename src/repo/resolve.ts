@@ -30,7 +30,7 @@ export function resolveRepo(): Promise<ResolvedRepo> {
 }
 
 /** Accepts "owner/repo", a full https URL, or a git@ URL — whatever someone pastes in. */
-function parseGithubRepo(raw: string): { owner: string; name: string } {
+export function parseGithubRepo(raw: string): { owner: string; name: string } {
   const cleaned = raw
     .trim()
     .replace(/^git@github\.com:/, '')
