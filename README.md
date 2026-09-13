@@ -1,5 +1,77 @@
 # bisect
 
+## What is the app?
+
+bisect is two agents sharing one codebase-agnostic core, built around a single rule: **a claim
+needs evidence, or it doesn't get made.** Most "AI triage" tools read a bug report or a diff and
+produce a plausible-sounding guess. Both halves of bisect refuse to do that — they go find out
+what actually happened, and say so honestly when they can't.
+
+- **bisect** (the investigator) takes a bug report from Slack, finds the reporting user's *real*
+  session in PostHog and/or their *real* crash in Sentry, reads the actual source code that
+  handled that request, and only then produces a diagnosis — cited against the specific
+  evidence ids that support it. If the trace and the code don't add up to an explanation, it
+  says exactly what it looked at and what was missing, instead of guessing. It then files a
+  Linear ticket and, above a confidence bar and with a human's Slack approval, can write the fix
+  itself and open a real PR.
+- **pr-manager** (the reviewer) takes a GitHub pull request, clones its branch into a sandbox,
+  runs `npm install`, boots the dev server, and *actually uses the running app* — hitting API
+  routes directly and driving a real browser through the UI — before writing a review. It caught
+  a real seeded bug this way (a cart total that stopped multiplying by quantity) by adding two
+  items and reading the wrong total off the live page, not by noticing the diff looked
+  suspicious. A human can also ask it for more via an `@bisect ...` PR comment — a scoped
+  re-review, or an actual code change, live-verified in the same sandbox before it opens a
+  follow-up PR.
+
+Neither agent is wired to one fixed codebase. The first time bisect looks at a repo it maps
+which observability services that repo actually uses and writes a small, reusable routing skill
+into it (`bisect-skills/`), so every bug report after that routes straight to "query PostHog
+like this" instead of rediscovering the codebase from scratch. `npm run setup` is the guided
+path to pointing either agent at your own repo, your own Slack, your own Linear team, your own
+PostHog/Sentry project.
+
+## How you used the apps?
+
+| App | What it's actually used for |
+|---|---|
+| **Slack** | The bug-report intake channel bisect polls. Also the approval gate for auto-implement — bisect posts "want me to fix this?" and a ✅ reaction is what authorizes it to write code and open a PR. |
+| **Linear** | Every investigation outcome — diagnosed, abstained, or skipped — gets filed as a ticket, with the evidence table and citations in the description, not just a one-line summary. |
+| **PostHog** | Person lookup by email → their real event history (page views, clicks, custom events like `checkout_response`) → raw HogQL for anything the built-in tools can't answer. This is what makes "diagnosed" mean something. |
+| **Sentry** | The crash-trace counterpart to PostHog — search issues by the reporting user's email, pull the latest event's stack trace and breadcrumb trail. Optional per codebase; a repo without Sentry just gets an honest "not configured" from the tool instead of an error. |
+| **GitHub** | Repo cloning, PR diffs, PR comments, branch/commit/push for auto-fix PRs — and a real **GitHub App** (not a personal token), registered via GitHub's manifest flow with one click, so every automated action shows up as its own bot identity instead of a human's account. |
+| **Stripe** | Wired into the test-fixture app (`acme-shop`) as a genuine test-mode payment integration, so there's a real `PaymentIntent` and real decline codes to reason about instead of a fake gateway that just checks if a string ends in `0000`. |
+| **Vercel** | Where the test-fixture app is actually deployed — used to validate the full pipeline (bisect *and* pr-manager) against a live, production-shaped target, not just a local dev server. |
+| **OpenRouter** | The LLM backend for every agent call (free-tier Nemotron models), with automatic multi-key failover — free-tier rate limits are common enough that this mattered in practice, not just in theory. |
+
+## Demo link
+
+`[ADD YOUR DEMO VIDEO / LIVE LINK HERE]`
+
+## Your evaluation criteria
+
+What this is actually trying to be good at, in order:
+
+1. **Does a diagnosis or review cite real evidence, or is it a guess?** Every `conclude()` and
+   `submit_review()` is checked in code against the evidence ids actually collected that run —
+   an uncited claim is discarded regardless of what the model asserted. This is the single
+   thing most worth checking: read a `runs/*.json` or `pr-reviews/*.json` and see whether the
+   cited evidence actually supports the claim.
+2. **Does it abstain honestly when it can't back a claim?** `NO_DIAGNOSIS` / `NO_SESSION` /
+   an `ERROR` review outcome are meant to be *common and correct* outputs, not failures of the
+   system — a confident wrong answer is the actual failure mode being designed against.
+3. **Does pr-manager really run the code, or read the diff and guess?** It caught the seeded
+   cart-quantity bug by adding items to a live cart and reading the total, not by pattern-
+   matching the diff. Check whether a review's findings trace back to an `http_request` or
+   `browser_*` evidence id, not just "the diff looks wrong."
+4. **Does it generalize, or is it secretly hardcoded to `acme-shop`?** `bisect-skills/` is
+   generated per-repo on first contact, not shipped with the demo fixture — and `npm run setup`
+   is meant to make "point this at a different repo entirely" a real, testable claim, not an
+   aspirational one.
+5. **Breadth and depth of real integration**, not mocked stand-ins — eight services above, each
+   doing something the system's core claim (evidence over guessing) actually depends on.
+
+## Codebase-agnostic core
+
 Two agents sharing one codebase-agnostic core: **bisect** investigates bug reports the way a
 human engineer would — finding the user's real session, reading the actual code, and only then
 saying what's wrong, not guessing from one Slack sentence. **pr-manager** does the same thing
