@@ -2,10 +2,10 @@ import { readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions';
-import { CONFIG } from '../config.js';
-import type { RepoClient, SkillBootstrap, SkillReference } from '../types.js';
-import { createChatCompletion } from '../agent/client.js';
-import { toOpenAITools, type ToolDef } from '../agent/tools.js';
+import { CONFIG } from '../../config.js';
+import type { SkillBootstrap, SkillReference } from '../types.js';
+import type { RepoClient } from '../../types.js';
+import { createChatCompletion, toOpenAITools, type ToolDef } from '../../clients/llm.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 

@@ -184,7 +184,7 @@ with first:
   GitHub settings page — install it on every repo you want bisect/pr-manager to have write
   access to.
 - **pr-manager's sandbox assumes an `npm install && npm run dev`-shaped repo** (see
-  [sandbox.ts](src/pr-review/sandbox.ts)) — it works well for Next.js/React-style apps like the
+  [sandbox.ts](src/pr-manager/sandbox.ts)) — it works well for Next.js/React-style apps like the
   demo fixture (`acme-shop`), and less well for anything with a fundamentally different
   install/boot story (a different package manager's lockfile is fine; a non-Node stack is not,
   today).
@@ -209,10 +209,10 @@ pr-manager — review one PR directly (no public URL needed), or run the webhook
 live "opened" auto-review + "@bisect ..." comment handling:
 
 ```bash
-npx tsx src/pr-review/server.ts --pr 17
-npx tsx src/pr-review/server.ts --pr 17 --instruction "focus on the checkout API only"
-npx tsx src/pr-review/server.ts --pr 17 --instruction "fix the cart total to multiply by quantity"
-npx tsx src/pr-review/server.ts   # no --pr: starts the webhook server on PR_REVIEW_PORT
+npx tsx src/pr-manager/server.ts --pr 17
+npx tsx src/pr-manager/server.ts --pr 17 --instruction "focus on the checkout API only"
+npx tsx src/pr-manager/server.ts --pr 17 --instruction "fix the cart total to multiply by quantity"
+npx tsx src/pr-manager/server.ts   # no --pr: starts the webhook server on PR_REVIEW_PORT
 ```
 
 The webhook path needs a public URL pointed at `/webhook` (Settings → Webhooks on the repo) —
@@ -224,51 +224,67 @@ the *original* PR's branch (not main); anything else re-reviews, scoped by whate
 
 ## Project layout
 
+Two pipelines, one shared foundation — `bisect/` and `pr-manager/` are siblings, each
+self-contained, each depending only on the top-level `clients/`, `setup/`, `config.ts`, and
+`types.ts` (never on each other's internals):
+
 ```
 src/
-  types.ts               the contracts + client interfaces
-  config.ts               env loading, model tiers, cost table, thresholds
+  types.ts                 SHARED client contracts only (SlackClient, PostHogClient,
+                           SentryClient, RepoClient, GitHubClient, LinearClient, and their
+                           data shapes) — implemented by clients/, used by both pipelines
+  config.ts                 env loading, model tiers, cost table, thresholds
   setup/
-    wizard.ts               npm run setup — the interactive .env walkthrough
-    envFile.ts               shared "upsert one KEY=value line" helper
-  clients/
-    slack.ts               poll history, reply, Block Kit post, reaction polling (approval gate)
-    posthog.ts              person lookup, HogQL query, event fetch, replay URL
-    sentry.ts               issue search, latest-event stack trace + breadcrumbs — optional
-    repo.ts                 list/read/grep/write, path-traversal blocked
-    linear.ts               issueCreate / addComment / getIssue
-    github.ts               clone / branch / commit / push (git CLI) + PR open (REST)
-    githubApp.ts             RS256 App JWT signing + installation-token exchange
-    githubAuth.ts            resolves either the App's installation token or a plain PAT,
-                             transparently, for everything in github.ts
-  repo/resolve.ts          GITHUB_REPO (clone) or REPO_PATH (local) — cached per process,
-                           cleaned up on process exit or after a bootstrap PR
-  skills/
-    first-time.md           bisect's own bootstrap instructions — lives HERE, never copied
-                             into a target repo (only skill.md + references/*.md are)
-    bootstrap.ts             CASE 1: discovery agent loop → SkillBootstrap
-    detect.ts                does bisect-skills/skill.md exist in the target repo?
-    apply.ts                 writes skill.md + references/*.md — as a PR if GitHub-backed,
-                             directly to disk if local REPO_PATH
-  agent/
-    client.ts                OpenRouter multi-key failover, then optional local Ollama fallback
-    tools.ts                 investigation tools, evidence-id bookkeeping, OpenAI tool adapter
-    investigate.ts            the loop + post-hoc enforcement + skill.md injection
-    implement.ts              Slack-approved auto-fix agent → patch → PR
-  steps/parse.ts            Slack text → structured report
-  report/render.ts          Linear markdown + Slack Block Kit formatting
-  ui/
-    server.ts                tiny Node http server, no framework
-    index.html                dashboard reading runs/*.json — list + detail view, aggregate stats
-  index.ts                  poll loop, --text dry-run mode, run recording to runs/
-  pr-review/                 the sibling pipeline — see the diagram above
-    server.ts                 --pr N (one-shot) or the webhook server
-    webhook.ts                 signature verification, opened-only auto-trigger, @bisect routing
-    setupGithubApp.ts          npm run setup:github-app — manifest-flow App creation, one click
-    sandbox.ts                  clone PR branch → npm install → boot → wait for real HTTP
-    agent.ts / tools.ts         review loop: http_request, browser_*, submit_review
+    wizard.ts                 npm run setup — the interactive .env walkthrough
+    envFile.ts                 shared "upsert one KEY=value line" helper
+  clients/                  every external service, used by whichever pipeline needs it
+    slack.ts                 poll history, reply, Block Kit post, reaction polling (approval gate)
+    posthog.ts                person lookup, HogQL query, event fetch, replay URL
+    sentry.ts                 issue search, latest-event stack trace + breadcrumbs — optional
+    repo.ts                   list/read/grep/write, path-traversal blocked
+    linear.ts                 issueCreate / addComment / getIssue
+    github.ts                 clone / branch / commit / push (git CLI) + PR open (REST) +
+                               parseGithubRepo — credentials go through the environment, never
+                               argv (see the comment on gitAuthEnv() for why that's load-bearing)
+    githubApp.ts               RS256 App JWT signing + installation-token exchange
+    githubAuth.ts              resolves either the App's installation token or a plain PAT,
+                               transparently, for everything in github.ts
+    llm.ts                     createChatCompletion (OpenRouter multi-key failover, then
+                               optional local Ollama fallback) + the ToolDef/toOpenAITools
+                               adapter both pipelines' tool loops build on
+
+  bisect/                   the investigation pipeline — everything here is bisect-only
+    index.ts                  poll loop, --text dry-run mode, run recording to runs/
+    types.ts                   bisect's own domain types: Investigation, Diagnosis, Evidence,
+                               AgentStep, ParsedReport, SkillBootstrap
+    agent/
+      tools.ts                  investigation tools, evidence-id bookkeeping
+      investigate.ts             the loop + post-hoc enforcement + skill.md injection
+      implement.ts               Slack-approved auto-fix agent → patch → PR
+    repo/resolve.ts            GITHUB_REPO (clone) or REPO_PATH (local) — cached per process,
+                               cleaned up on process exit or after a bootstrap PR
+    skills/
+      first-time.md             bisect's own bootstrap instructions — lives HERE, never copied
+                                 into a target repo (only skill.md + references/*.md are)
+      bootstrap.ts               CASE 1: discovery agent loop → SkillBootstrap
+      detect.ts                  does bisect-skills/skill.md exist in the target repo?
+      apply.ts                   writes skill.md + references/*.md — as a PR if GitHub-backed,
+                                 directly to disk if local REPO_PATH
+    steps/parse.ts              Slack text → structured report
+    report/render.ts            Linear markdown + Slack Block Kit formatting
+    ui/
+      server.ts                  tiny Node http server, no framework
+      index.html                  dashboard reading runs/*.json — list + detail view
+
+  pr-manager/                the review pipeline — everything here is pr-manager-only
+    types.ts                    its own domain types: ReviewResult, PrReviewRun, PrImplementRun
+    server.ts                   --pr N (one-shot) or the webhook server
+    webhook.ts                   signature verification, opened-only auto-trigger, @bisect routing
+    setupGithubApp.ts            npm run setup:github-app — manifest-flow App creation, one click
+    sandbox.ts                    clone PR branch → npm install → boot → wait for real HTTP
+    agent.ts / tools.ts           review loop: http_request, browser_*, submit_review
     implementAgent.ts / implementTools.ts   write-capable loop reusing the same live sandbox
-    run.ts                      orchestrates both; renders + posts the PR comment
+    run.ts                        orchestrates both; renders + posts the PR comment
 ```
 
 Every run — evidence collected, every tool call, the diagnosis or the abstention reason, cost,

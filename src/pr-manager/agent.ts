@@ -1,7 +1,6 @@
 import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions';
 import { CONFIG, costUsd } from '../config.js';
-import { toOpenAITools } from '../agent/tools.js';
-import { createChatCompletion } from '../agent/client.js';
+import { createChatCompletion, toOpenAITools } from '../clients/llm.js';
 import type { ReviewEvidence, ReviewResult, ReviewStep } from './types.js';
 import { REVIEW_TOOLS, runReviewTool, type ReviewToolDeps } from './tools.js';
 

@@ -1,29 +1,12 @@
-import type {
-  Diagnosis,
-  Evidence,
-  PostHogClient,
-  PostHogEvent,
-  RepoClient,
-  SentryClient,
-  SentryIssue,
-} from '../types.js';
+import type { Diagnosis, Evidence } from '../types.js';
+import type { PostHogClient, PostHogEvent, RepoClient, SentryClient, SentryIssue } from '../../types.js';
+import type { ToolDef } from '../../clients/llm.js';
 
 /** What a tool call produces: a human summary, optional evidence, optional loop exit. */
 export interface ToolOutcome {
   text: string;
   evidence?: Evidence;
   terminal?: { kind: 'conclude'; diagnosis: Diagnosis } | { kind: 'abstain'; reason: string };
-}
-
-/** Provider-agnostic tool definition — adapted to whichever SDK's shape at the call site. */
-export interface ToolDef {
-  name: string;
-  description: string;
-  input_schema: {
-    type: 'object';
-    properties: Record<string, unknown>;
-    required?: string[];
-  };
 }
 
 export const TOOLS: ToolDef[] = [
@@ -454,16 +437,4 @@ export async function runTool(
     default:
       return { text: `Unknown tool: ${name}` };
   }
-}
-
-/** Adapt our provider-agnostic ToolDef[] to the OpenAI-compatible function-calling shape. */
-export function toOpenAITools(tools: ToolDef[]) {
-  return tools.map((t) => ({
-    type: 'function' as const,
-    function: {
-      name: t.name,
-      description: t.description,
-      parameters: t.input_schema,
-    },
-  }));
 }

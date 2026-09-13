@@ -1,7 +1,6 @@
-import { CONFIG } from '../config.js';
+import { CONFIG } from '../../config.js';
 import type { ParsedReport } from '../types.js';
-import { createChatCompletion } from '../agent/client.js';
-import { toOpenAITools, type ToolDef } from '../agent/tools.js';
+import { createChatCompletion, toOpenAITools, type ToolDef } from '../../clients/llm.js';
 
 const TOOL: ToolDef = {
   name: 'record_report',

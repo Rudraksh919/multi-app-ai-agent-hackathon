@@ -101,7 +101,7 @@ async function main(): Promise<void> {
   if (useApp) console.log('  npm run setup:github-app                                    one-click bot identity');
   console.log('  npm run start -- --text "checkout is broken for jane@..."  fast dry-run, no Slack needed');
   console.log('  npm run dev                                                 the real thing: polls Slack');
-  console.log('  npx tsx src/pr-review/server.ts --pr <N>                    review one PR directly');
+  console.log('  npx tsx src/pr-manager/server.ts --pr <N>                    review one PR directly');
   console.log('\nSee README.md for the rest of it.');
 }
 

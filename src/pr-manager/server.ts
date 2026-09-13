@@ -1,5 +1,5 @@
 import { env } from '../config.js';
-import { parseGithubRepo } from '../repo/resolve.js';
+import { parseGithubRepo } from '../clients/github.js';
 import { startWebhookServer } from './webhook.js';
 import { runPrReview, runPrImplement } from './run.js';
 import { prInfoFromNumber, isImplementIntent } from './lookup.js';

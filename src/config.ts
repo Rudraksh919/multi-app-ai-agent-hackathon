@@ -13,7 +13,7 @@ function optional(name: string, fallback: string): string {
 export const env = {
   /**
    * One or more OpenRouter keys, tried in order on every LLM call — see
-   * src/agent/client.ts:createChatCompletion(). Free-tier "service temporarily overloaded"
+   * src/clients/llm.ts:createChatCompletion(). Free-tier "service temporarily overloaded"
    * errors are common and per-key, so a second/third key (different accounts) often just
    * works when the first doesn't. OPENROUTER_API_KEYS is comma-separated and takes priority;
    * falls back to the single OPENROUTER_API_KEY for backward compatibility.
@@ -63,7 +63,7 @@ export const env = {
   /**
    * Repo access is either GITHUB_REPO ("owner/repo", cloned fresh via git) or a plain
    * local REPO_PATH. GITHUB_REPO is what makes bisect work on any codebase rather than
-   * one fixed local checkout — see src/repo/resolve.ts.
+   * one fixed local checkout — see src/bisect/repo/resolve.ts.
    */
   repoPath: () => optional('REPO_PATH', '../acme-shop'),
   githubRepo: () => process.env.GITHUB_REPO || null, // "owner/repo"
@@ -78,7 +78,7 @@ export const env = {
    * GitHub App identity — when all three are set, API calls (comments, reactions, clones)
    * authenticate as the App's own installation token instead of a personal token, so they
    * show up as "bisect[bot]" rather than whichever human's PAT is in GITHUB_TOKEN. Falls
-   * back to GITHUB_TOKEN when unset. See src/pr-review/setupGithubApp.ts.
+   * back to GITHUB_TOKEN when unset. See src/pr-manager/setupGithubApp.ts.
    */
   githubAppId: () => process.env.GITHUB_APP_ID || null,
   githubAppPrivateKeyPath: () => process.env.GITHUB_APP_PRIVATE_KEY_PATH || null,
@@ -116,7 +116,7 @@ export const CONFIG = {
 
   agent: {
     /** Hard ceiling on tool calls. Exhausting it is an abstention, not a failure. */
-    maxSteps: 20,
+    maxSteps: 25,
     maxTokens: 8000,
   },
 

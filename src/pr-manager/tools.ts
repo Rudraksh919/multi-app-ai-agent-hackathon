@@ -1,4 +1,4 @@
-import type { ToolDef } from '../agent/tools.js';
+import type { ToolDef } from '../clients/llm.js';
 import type { ReviewEvidence, ReviewFinding, ReviewResult, ReviewVerdict } from './types.js';
 import { clickTarget, readPage, typeInto, type BrowserSession } from './browserTools.js';
 
