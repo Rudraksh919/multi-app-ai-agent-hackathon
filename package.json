@@ -5,6 +5,7 @@
   "type": "module",
   "description": "An agent that investigates bug reports using real user sessions, not guesses.",
   "scripts": {
+    "setup": "tsx src/setup/wizard.ts",
     "dev": "tsx watch src/index.ts",
     "start": "tsx src/index.ts",
     "once": "tsx src/index.ts --once",

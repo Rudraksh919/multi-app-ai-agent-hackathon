@@ -10,19 +10,22 @@
  */
 import { randomBytes } from 'node:crypto';
 import { createServer } from 'node:http';
-import { writeFile, appendFile, readFile } from 'node:fs/promises';
+import { writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { signAppJwt, listInstallations } from '../clients/githubApp.js';
+import { upsertEnvVar, readEnvVar } from '../setup/envFile.js';
 
 const PORT = 4323;
 const CALLBACK_URL = `http://localhost:${PORT}/callback`;
 const KEY_PATH = resolve('.github-app-key.pem');
-const ENV_PATH = resolve('.env');
 
-function manifestHtml(state: string): string {
+async function manifestHtml(state: string): Promise<string> {
+  // Just the App's public "homepage" link — cosmetic, doesn't need to be functionally
+  // correct. Uses whichever repo this instance is actually configured for, if set yet.
+  const homepage = (await readEnvVar('GITHUB_REPO')) || 'https://github.com';
   const manifest = {
     name: `bisect-review-${randomBytes(3).toString('hex')}`, // app names are global across all of GitHub — must be unique
-    url: 'https://github.com/Rudraksh919/multi-app-ai-agent-hackathon',
+    url: homepage.startsWith('http') ? homepage : `https://github.com/${homepage}`,
     redirect_url: CALLBACK_URL,
     // The manifest requires *some* hook url (can't be blank) but it also can't be localhost
     // (not publicly reachable). Since active:false, GitHub never actually delivers anything
@@ -48,16 +51,6 @@ function manifestHtml(state: string): string {
 </body></html>`;
 }
 
-async function saveEnvVar(key: string, value: string): Promise<void> {
-  const existing = await readFile(ENV_PATH, 'utf8').catch(() => '');
-  const line = `${key}=${value}`;
-  if (new RegExp(`^${key}=`, 'm').test(existing)) {
-    await writeFile(ENV_PATH, existing.replace(new RegExp(`^${key}=.*$`, 'm'), line), 'utf8');
-  } else {
-    await appendFile(ENV_PATH, `${existing.endsWith('\n') || !existing ? '' : '\n'}${line}\n`, 'utf8');
-  }
-}
-
 async function waitForInstallation(appJwt: string, appId: string): Promise<void> {
   console.log('\nWaiting for you to install the app (up to 3 minutes)…');
   const deadline = Date.now() + 3 * 60_000;
@@ -66,7 +59,7 @@ async function waitForInstallation(appJwt: string, appId: string): Promise<void>
     if (installs.length > 0) {
       const install = installs[0];
       if (!install) break;
-      await saveEnvVar('GITHUB_APP_INSTALLATION_ID', String(install.id));
+      await upsertEnvVar('GITHUB_APP_INSTALLATION_ID', String(install.id));
       console.log(`\nInstalled on: ${install.account?.login ?? '(unknown account)'}`);
       console.log('GITHUB_APP_INSTALLATION_ID written to .env — setup complete.');
       console.log(`App id ${appId} + private key at ${KEY_PATH} are also in .env now.`);
@@ -89,7 +82,7 @@ async function main(): Promise<void> {
       const url = new URL(req.url ?? '/', `http://localhost:${PORT}`);
 
       if (url.pathname === '/') {
-        res.writeHead(200, { 'Content-Type': 'text/html' }).end(manifestHtml(state));
+        res.writeHead(200, { 'Content-Type': 'text/html' }).end(await manifestHtml(state));
         return;
       }
 
@@ -110,9 +103,9 @@ async function main(): Promise<void> {
           const app = (await convRes.json()) as { id: number; pem: string; webhook_secret: string; slug: string };
 
           await writeFile(KEY_PATH, app.pem, 'utf8');
-          await saveEnvVar('GITHUB_APP_ID', String(app.id));
-          await saveEnvVar('GITHUB_APP_PRIVATE_KEY_PATH', KEY_PATH);
-          if (app.webhook_secret) await saveEnvVar('GITHUB_WEBHOOK_SECRET', app.webhook_secret);
+          await upsertEnvVar('GITHUB_APP_ID', String(app.id));
+          await upsertEnvVar('GITHUB_APP_PRIVATE_KEY_PATH', KEY_PATH);
+          if (app.webhook_secret) await upsertEnvVar('GITHUB_WEBHOOK_SECRET', app.webhook_secret);
 
           res.writeHead(200, { 'Content-Type': 'text/html' }).end(
             `<html><body style="font-family:sans-serif;padding:2rem">
