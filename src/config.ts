@@ -36,6 +36,16 @@ export const env = {
   /** HMAC secret configured on the GitHub webhook (Settings -> Webhooks). Required to trust a payload. */
   githubWebhookSecret: () => process.env.GITHUB_WEBHOOK_SECRET || null,
   prReviewPort: () => Number(optional('PR_REVIEW_PORT', '4322')),
+
+  /**
+   * GitHub App identity — when all three are set, API calls (comments, reactions, clones)
+   * authenticate as the App's own installation token instead of a personal token, so they
+   * show up as "bisect[bot]" rather than whichever human's PAT is in GITHUB_TOKEN. Falls
+   * back to GITHUB_TOKEN when unset. See src/pr-review/setupGithubApp.ts.
+   */
+  githubAppId: () => process.env.GITHUB_APP_ID || null,
+  githubAppPrivateKeyPath: () => process.env.GITHUB_APP_PRIVATE_KEY_PATH || null,
+  githubAppInstallationId: () => process.env.GITHUB_APP_INSTALLATION_ID || null,
 };
 
 export const CONFIG = {

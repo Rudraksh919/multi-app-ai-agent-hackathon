@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { GitHubClient, RepoClient } from '../types.js';
-import { env } from '../config.js';
+import { resolveGithubToken, githubAuthConfigured } from './githubAuth.js';
 
 const run = promisify(execFile);
 
@@ -15,14 +15,15 @@ const run = promisify(execFile);
  * `http.extraHeader` supplies the credential directly, so nothing ever touches the OS
  * credential store.
  */
-function authFlags(token: string | null): string[] {
+async function authFlags(): Promise<string[]> {
+  const token = await resolveGithubToken();
   if (!token) return [];
   const basic = Buffer.from(`x-access-token:${token}`).toString('base64');
   return ['-c', 'credential.helper=', '-c', `http.extraHeader=Authorization: Basic ${basic}`];
 }
 
 async function git(args: string[], cwd: string): Promise<string> {
-  const { stdout } = await run('git', [...authFlags(env.githubToken()), ...args], {
+  const { stdout } = await run('git', [...(await authFlags()), ...args], {
     cwd,
     maxBuffer: 16 * 1024 * 1024,
   });
@@ -37,7 +38,7 @@ export async function cloneRepo(
   branch: string | null,
 ): Promise<string> {
   const url = `https://github.com/${owner}/${repo}.git`;
-  const args = [...authFlags(env.githubToken()), 'clone', '--depth', '1'];
+  const args = [...(await authFlags()), 'clone', '--depth', '1'];
   if (branch) args.push('--branch', branch);
   args.push(url, destDir);
 
@@ -46,10 +47,11 @@ export async function cloneRepo(
 }
 
 async function ghApi<T>(path: string, init?: RequestInit): Promise<T> {
+  const token = await resolveGithubToken();
   const res = await fetch(`https://api.github.com${path}`, {
     ...init,
     headers: {
-      Authorization: `Bearer ${env.githubToken()}`,
+      Authorization: `Bearer ${token}`,
       Accept: 'application/vnd.github+json',
       ...(init?.body ? { 'Content-Type': 'application/json' } : {}),
       ...init?.headers,
@@ -99,6 +101,14 @@ export async function postPrComment(owner: string, repo: string, prNumber: numbe
   return json.html_url;
 }
 
+/** React to a comment (e.g. 👀 to ack a "@bisect review" mention before the multi-minute review runs). */
+export async function reactToComment(owner: string, repo: string, commentId: number, content: string): Promise<void> {
+  await ghApi(`/repos/${owner}/${repo}/issues/comments/${commentId}/reactions`, {
+    method: 'POST',
+    body: JSON.stringify({ content }),
+  });
+}
+
 async function defaultBranch(cwd: string): Promise<string> {
   try {
     const ref = await git(['symbolic-ref', 'refs/remotes/origin/HEAD'], cwd);
@@ -111,7 +121,7 @@ async function defaultBranch(cwd: string): Promise<string> {
 export function makeGitHubClient(owner: string | null, repo: string | null, repoClient: RepoClient): GitHubClient {
   return {
     available() {
-      return Boolean(env.githubToken() && owner && repo);
+      return Boolean(githubAuthConfigured() && owner && repo);
     },
 
     async commitAndOpenPr({ branch, title, body, files }) {
@@ -128,22 +138,11 @@ export function makeGitHubClient(owner: string | null, repo: string | null, repo
       await git(['-c', 'user.email=bisect@local', '-c', 'user.name=bisect', 'commit', '-m', title], cwd);
       await git(['push', 'origin', branch], cwd);
 
-      const res = await fetch(`https://api.github.com/repos/${owner}/${repo}/pulls`, {
+      const json = await ghApi<{ html_url: string }>(`/repos/${owner}/${repo}/pulls`, {
         method: 'POST',
-        headers: {
-          Authorization: `Bearer ${env.githubToken()}`,
-          Accept: 'application/vnd.github+json',
-          'Content-Type': 'application/json',
-        },
         body: JSON.stringify({ title, head: branch, base, body }),
       });
 
-      if (!res.ok) {
-        const text = await res.text();
-        throw new Error(`GitHub PR create -> ${res.status}: ${text.slice(0, 400)}`);
-      }
-
-      const json = (await res.json()) as { html_url: string };
       return json.html_url;
     },
   };

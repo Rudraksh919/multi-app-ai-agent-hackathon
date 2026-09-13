@@ -151,6 +151,11 @@ export async function runReviewTool(
     case 'browser_navigate': {
       const path = String(input.path ?? '/');
       await browser.page.goto(new URL(path, baseUrl).toString(), { waitUntil: 'domcontentloaded' });
+      // domcontentloaded fires before client-side hydration finishes — a client component
+      // that reads state in a post-mount useEffect (e.g. hydrating from localStorage) hasn't
+      // run yet. Reading the page immediately here produces false positives like "empty
+      // cart" for state that populates a beat later. Give it a moment, same as browser_click.
+      await browser.page.waitForTimeout(400);
       const text = await readPage(browser.page);
       const id = nextId(evidence, 'ui');
       return {

@@ -1,8 +1,13 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { env, CONFIG } from '../config.js';
+import { reactToComment } from '../clients/github.js';
 import { runPrReview } from './run.js';
+import { prInfoFromNumber } from './lookup.js';
 import type { PrInfo } from './types.js';
+
+/** Matches "@bisect", "@bisect review", etc. — same mention pattern GitHub's own bots use. */
+const MENTION = /@bisect\b/i;
 
 function verifySignature(payload: Buffer, signature: string | undefined, secret: string): boolean {
   if (!signature) return false;
@@ -32,6 +37,15 @@ interface GitHubPullRequestEvent {
     base: { ref: string; repo: { owner: { login: string }; name: string } };
     head: { ref: string; sha: string; repo: { owner: { login: string }; name: string } | null };
   };
+}
+
+/** GitHub models a PR comment as an "issue comment" — `issue.pull_request` is only present
+ * when the issue being commented on is actually a PR. */
+interface GitHubIssueCommentEvent {
+  action: string;
+  comment: { id: number; body: string };
+  issue: { number: number; pull_request?: unknown };
+  repository: { owner: { login: string }; name: string };
 }
 
 /** synchronize = a new commit was pushed to an already-open PR — re-review it. */
@@ -81,32 +95,60 @@ export function startWebhookServer(): void {
       }
 
       const event = req.headers['x-github-event'];
-      if (event !== 'pull_request') {
-        res.writeHead(202).end('ignored (not a pull_request event)');
-        return;
-      }
-
-      let payload: GitHubPullRequestEvent;
+      let raw: unknown;
       try {
-        payload = JSON.parse(body.toString('utf8')) as GitHubPullRequestEvent;
+        raw = JSON.parse(body.toString('utf8'));
       } catch {
         res.writeHead(400).end('invalid JSON');
         return;
       }
 
-      if (!HANDLED_ACTIONS.has(payload.action)) {
-        res.writeHead(202).end(`ignored (action: ${payload.action})`);
+      if (event === 'pull_request') {
+        const payload = raw as GitHubPullRequestEvent;
+        if (!HANDLED_ACTIONS.has(payload.action)) {
+          res.writeHead(202).end(`ignored (action: ${payload.action})`);
+          return;
+        }
+
+        // Respond immediately — cloning, installing, booting, and testing the PR takes minutes,
+        // far past what GitHub's webhook delivery waits for before marking it timed out.
+        res.writeHead(202).end('reviewing');
+
+        const pr = toPrInfo(payload);
+        runPrReview(pr).catch((err) => {
+          console.error(`PR review crashed for #${pr.number}:`, err);
+        });
         return;
       }
 
-      // Respond immediately — cloning, installing, booting, and testing the PR takes minutes,
-      // far past what GitHub's webhook delivery waits for before marking it timed out.
-      res.writeHead(202).end('reviewing');
+      if (event === 'issue_comment') {
+        const payload = raw as GitHubIssueCommentEvent;
+        const isOnPr = Boolean(payload.issue.pull_request);
+        const mentioned = MENTION.test(payload.comment.body);
+        // Guard against reviewing our own review comments if they ever happened to match —
+        // they never say "@bisect", but this is cheap insurance against a future feedback loop.
+        const isOwnComment = payload.comment.body.includes('🤖 bisect review');
 
-      const pr = toPrInfo(payload);
-      runPrReview(pr).catch((err) => {
-        console.error(`PR review crashed for #${pr.number}:`, err);
-      });
+        if (payload.action !== 'created' || !isOnPr || !mentioned || isOwnComment) {
+          res.writeHead(202).end('ignored');
+          return;
+        }
+
+        res.writeHead(202).end('reviewing');
+
+        const { owner, name } = { owner: payload.repository.owner.login, name: payload.repository.name };
+        const prNumber = payload.issue.number;
+
+        reactToComment(owner, name, payload.comment.id, 'eyes').catch(() => {});
+        prInfoFromNumber(owner, name, prNumber)
+          .then((pr) => runPrReview(pr))
+          .catch((err) => {
+            console.error(`PR review crashed for #${prNumber} (mention trigger):`, err);
+          });
+        return;
+      }
+
+      res.writeHead(202).end('ignored (unhandled event type)');
     })();
   });
 

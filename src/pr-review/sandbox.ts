@@ -44,10 +44,12 @@ async function waitForReady(url: string, timeoutMs: number): Promise<void> {
   throw new Error(`App never answered at ${url} within ${timeoutMs}ms (last: ${lastErr})`);
 }
 
-function killTree(child: ChildProcess): void {
+/** Awaited, unlike a bare exec() — rm() right after this races a Windows process that
+ * hasn't released its file handles yet if we don't actually wait for the kill to land. */
+async function killTree(child: ChildProcess): Promise<void> {
   if (!child.pid) return;
   if (process.platform === 'win32') {
-    exec(`taskkill /pid ${child.pid} /T /F`);
+    await run(`taskkill /pid ${child.pid} /T /F`).catch(() => {});
   } else {
     try {
       process.kill(-child.pid, 'SIGKILL');
@@ -57,46 +59,66 @@ function killTree(child: ChildProcess): void {
   }
 }
 
+/** Windows can hold a just-killed process's file handles open for a moment — retry the
+ * delete rather than silently leaking the sandbox's node_modules (this leaked ~500MB per
+ * run before it was caught). Logs, rather than swallowing, if it still can't clean up. */
+async function cleanupDir(dir: string): Promise<void> {
+  for (let attempt = 0; attempt < 5; attempt++) {
+    try {
+      await rm(dir, { recursive: true, force: true });
+      return;
+    } catch {
+      await new Promise((r) => setTimeout(r, 500));
+    }
+  }
+  console.warn(`pr-review: could not remove sandbox dir ${dir} after cleanup — left on disk.`);
+}
+
 /**
  * Clone a PR's head branch, `npm install`, boot the dev server on a free port, and block
  * until it actually answers HTTP — a "the code compiles" isn't the same claim as "the app
  * runs", and only the second one is worth testing against.
+ *
+ * Every exit path here — clone failure, install failure, boot timeout — cleans up the temp
+ * dir. Leaving it on any failure (this used to only clean up on the boot-timeout path) is
+ * what silently filled a disk during testing.
  */
 export async function startSandbox(owner: string, repo: string, branch: string): Promise<Sandbox> {
   const dir = await mkdtemp(join(tmpdir(), 'pr-review-'));
-  await cloneRepo(owner, repo, dir, branch);
 
-  await run('npm install', {
-    cwd: dir,
-    maxBuffer: 32 * 1024 * 1024,
-    timeout: CONFIG.prReview.npmInstallTimeoutMs,
-  });
-
-  const port = await freePort();
-  const child = spawn('npm', ['run', 'dev', '--', '-p', String(port)], {
-    cwd: dir,
-    stdio: 'ignore',
-    shell: true,
-    detached: process.platform !== 'win32',
-  });
-
-  const baseUrl = `http://localhost:${port}`;
-
+  let child: ChildProcess | undefined;
   try {
+    await cloneRepo(owner, repo, dir, branch);
+
+    await run('npm install', {
+      cwd: dir,
+      maxBuffer: 32 * 1024 * 1024,
+      timeout: CONFIG.prReview.npmInstallTimeoutMs,
+    });
+
+    const port = await freePort();
+    child = spawn('npm', ['run', 'dev', '--', '-p', String(port)], {
+      cwd: dir,
+      stdio: 'ignore',
+      shell: true,
+      detached: process.platform !== 'win32',
+    });
+
+    const baseUrl = `http://localhost:${port}`;
     await waitForReady(baseUrl, CONFIG.prReview.sandboxReadyTimeoutMs);
+
+    return {
+      dir,
+      port,
+      baseUrl,
+      async stop() {
+        if (child) await killTree(child);
+        await cleanupDir(dir);
+      },
+    };
   } catch (err) {
-    killTree(child);
-    await rm(dir, { recursive: true, force: true }).catch(() => {});
+    if (child) await killTree(child);
+    await cleanupDir(dir);
     throw err;
   }
-
-  return {
-    dir,
-    port,
-    baseUrl,
-    async stop() {
-      killTree(child);
-      await rm(dir, { recursive: true, force: true }).catch(() => {});
-    },
-  };
 }
