@@ -1,5 +1,6 @@
-import { CONFIG } from '../config.js';
-import type { GitHubClient, RepoClient, SkillBootstrap } from '../types.js';
+import { CONFIG } from '../../config.js';
+import type { SkillBootstrap } from '../types.js';
+import type { GitHubClient, RepoClient } from '../../types.js';
 
 export interface ApplyResult {
   /** PR URL if this was a GitHub-backed repo with write access, else null (wrote locally). */

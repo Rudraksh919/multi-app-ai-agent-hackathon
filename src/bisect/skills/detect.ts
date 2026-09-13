@@ -1,5 +1,5 @@
-import { CONFIG } from '../config.js';
-import type { RepoClient } from '../types.js';
+import { CONFIG } from '../../config.js';
+import type { RepoClient } from '../../types.js';
 
 export async function hasSkills(repo: RepoClient): Promise<boolean> {
   try {

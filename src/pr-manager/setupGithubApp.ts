@@ -6,7 +6,7 @@
  * this script does on your behalf), and everything after that — the private key, the
  * webhook secret, finding the installation — is captured and written to .env automatically.
  *
- * Run with: npx tsx src/pr-review/setupGithubApp.ts
+ * Run with: npx tsx src/pr-manager/setupGithubApp.ts
  */
 import { randomBytes } from 'node:crypto';
 import { createServer } from 'node:http';

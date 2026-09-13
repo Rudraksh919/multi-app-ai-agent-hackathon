@@ -2,10 +2,10 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { env } from '../config.js';
-import { cloneRepo, makeGitHubClient } from '../clients/github.js';
-import { makeRepoClient } from '../clients/repo.js';
-import type { GitHubClient, RepoClient } from '../types.js';
+import { env } from '../../config.js';
+import { cloneRepo, makeGitHubClient, parseGithubRepo } from '../../clients/github.js';
+import { makeRepoClient } from '../../clients/repo.js';
+import type { GitHubClient, RepoClient } from '../../types.js';
 
 export interface ResolvedRepo {
   repo: RepoClient;
@@ -35,22 +35,6 @@ let exitHandlersRegistered = false;
 export function resolveRepo(): Promise<ResolvedRepo> {
   if (!cached) cached = doResolve();
   return cached;
-}
-
-/** Accepts "owner/repo", a full https URL, or a git@ URL — whatever someone pastes in. */
-export function parseGithubRepo(raw: string): { owner: string; name: string } {
-  const cleaned = raw
-    .trim()
-    .replace(/^git@github\.com:/, '')
-    .replace(/^https?:\/\/(www\.)?github\.com\//, '')
-    .replace(/\.git$/, '')
-    .replace(/\/+$/, '');
-
-  const [owner, name] = cleaned.split('/');
-  if (!owner || !name) {
-    throw new Error(`GITHUB_REPO must be "owner/repo" or a GitHub URL, got: ${raw}`);
-  }
-  return { owner, name };
 }
 
 async function doResolve(): Promise<ResolvedRepo> {
@@ -102,8 +86,9 @@ function registerExitCleanup(): void {
 }
 
 /** Force a fresh clone on the next resolveRepo() call — used after a first-run bootstrap
- * writes bisect-skills/ (see src/skills/), since commitAndOpenPr() leaves the cached clone
- * checked out on the bootstrap's own branch rather than the repo's normal default branch. */
+ * writes bisect-skills/ (see src/bisect/skills/), since commitAndOpenPr() leaves the cached
+ * clone checked out on the bootstrap's own branch rather than the repo's normal default
+ * branch. */
 export async function invalidateRepoCache(): Promise<void> {
   if (!cached) return;
   const { repo, slug } = await cached;

@@ -116,3 +116,27 @@ export async function createChatCompletion(
 
   return { res: null, error: lastError };
 }
+
+/** Provider-agnostic tool definition — adapted to whichever SDK's shape at the call site.
+ * Shared by bisect's and pr-manager's tool loops. */
+export interface ToolDef {
+  name: string;
+  description: string;
+  input_schema: {
+    type: 'object';
+    properties: Record<string, unknown>;
+    required?: string[];
+  };
+}
+
+/** Adapt our provider-agnostic ToolDef[] to the OpenAI-compatible function-calling shape. */
+export function toOpenAITools(tools: ToolDef[]) {
+  return tools.map((t) => ({
+    type: 'function' as const,
+    function: {
+      name: t.name,
+      description: t.description,
+      parameters: t.input_schema,
+    },
+  }));
+}

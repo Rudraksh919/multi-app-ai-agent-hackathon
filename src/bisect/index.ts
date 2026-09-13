@@ -1,10 +1,10 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { CONFIG, env } from './config.js';
-import { makeLinearClient } from './clients/linear.js';
-import { makePostHogClient } from './clients/posthog.js';
-import { makeSentryClient } from './clients/sentry.js';
-import { makeSlackClient } from './clients/slack.js';
+import { CONFIG, env } from '../config.js';
+import { makeLinearClient } from '../clients/linear.js';
+import { makePostHogClient } from '../clients/posthog.js';
+import { makeSentryClient } from '../clients/sentry.js';
+import { makeSlackClient } from '../clients/slack.js';
 import { investigate } from './agent/investigate.js';
 import { implementFix } from './agent/implement.js';
 import { parseReport } from './steps/parse.js';
@@ -20,7 +20,8 @@ import { resolveRepo, invalidateRepoCache } from './repo/resolve.js';
 import { hasSkills, readSkillMd } from './skills/detect.js';
 import { runBootstrap } from './skills/bootstrap.js';
 import { applyBootstrap } from './skills/apply.js';
-import type { Investigation, PostHogEvent, SlackMessage } from './types.js';
+import type { Investigation } from './types.js';
+import type { PostHogEvent, SlackMessage } from '../types.js';
 
 interface Options {
   once: boolean;

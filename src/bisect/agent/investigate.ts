@@ -1,8 +1,8 @@
 import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions';
-import { CONFIG, costUsd } from '../config.js';
+import { CONFIG, costUsd } from '../../config.js';
 import type { AgentStep, Diagnosis, Evidence, Outcome, ParsedReport } from '../types.js';
-import { createChatCompletion } from './client.js';
-import { TOOLS, runTool, toOpenAITools, type ToolDeps } from './tools.js';
+import { createChatCompletion, toOpenAITools } from '../../clients/llm.js';
+import { TOOLS, runTool, type ToolDeps } from './tools.js';
 
 const SYSTEM = `You are a debugging agent. A user reported a bug in a web application. Your job is
 to find out what actually happened and, if the evidence supports it, which code is responsible.

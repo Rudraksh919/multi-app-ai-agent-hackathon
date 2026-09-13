@@ -2,7 +2,7 @@ import { createServer } from 'node:http';
 import { readFile, readdir } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { CONFIG } from '../config.js';
+import { CONFIG } from '../../config.js';
 import type { Investigation } from '../types.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));

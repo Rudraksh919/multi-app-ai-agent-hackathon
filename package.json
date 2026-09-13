@@ -6,15 +6,15 @@
   "description": "An agent that investigates bug reports using real user sessions, not guesses.",
   "scripts": {
     "setup": "tsx src/setup/wizard.ts",
-    "dev": "tsx watch src/index.ts",
-    "start": "tsx src/index.ts",
-    "once": "tsx src/index.ts --once",
+    "dev": "tsx watch src/bisect/index.ts",
+    "start": "tsx src/bisect/index.ts",
+    "once": "tsx src/bisect/index.ts --once",
     "typecheck": "tsc --noEmit",
-    "ui": "tsx src/ui/server.ts",
+    "ui": "tsx src/bisect/ui/server.ts",
     "bench": "tsx benchmark/run.ts",
-    "review": "tsx src/pr-review/server.ts",
-    "review:pr": "tsx src/pr-review/server.ts --pr",
-    "setup:github-app": "tsx src/pr-review/setupGithubApp.ts"
+    "review": "tsx src/pr-manager/server.ts",
+    "review:pr": "tsx src/pr-manager/server.ts --pr",
+    "setup:github-app": "tsx src/pr-manager/setupGithubApp.ts"
   },
   "dependencies": {
     "dotenv": "^17.2.3",

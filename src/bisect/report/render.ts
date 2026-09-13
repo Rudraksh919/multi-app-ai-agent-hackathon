@@ -1,4 +1,5 @@
-import type { Evidence, Investigation, PostHogEvent } from '../types.js';
+import type { Evidence, Investigation } from '../types.js';
+import type { PostHogEvent } from '../../types.js';
 
 /** The richest event list the agent pulled — used to show a human what it saw. */
 function timelineFrom(evidence: Evidence[]): PostHogEvent[] {

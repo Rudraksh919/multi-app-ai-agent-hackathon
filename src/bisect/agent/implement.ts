@@ -1,8 +1,8 @@
 import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions';
-import { CONFIG } from '../config.js';
-import type { Diagnosis, GitHubClient, RepoClient } from '../types.js';
-import { createChatCompletion } from './client.js';
-import { toOpenAITools, type ToolDef } from './tools.js';
+import { CONFIG } from '../../config.js';
+import type { Diagnosis } from '../types.js';
+import type { GitHubClient, RepoClient } from '../../types.js';
+import { createChatCompletion, toOpenAITools, type ToolDef } from '../../clients/llm.js';
 
 const TOOLS: ToolDef[] = [
   {
