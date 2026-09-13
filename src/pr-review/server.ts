@@ -1,31 +1,29 @@
 import { env } from '../config.js';
-import { getPr } from '../clients/github.js';
 import { parseGithubRepo } from '../repo/resolve.js';
 import { startWebhookServer } from './webhook.js';
-import { runPrReview } from './run.js';
-import type { PrInfo } from './types.js';
+import { runPrReview, runPrImplement } from './run.js';
+import { prInfoFromNumber, isImplementIntent } from './lookup.js';
 
-/** Ad-hoc mode: review one existing PR directly, no webhook or public URL required. */
-async function runOnce(prNumber: number): Promise<void> {
+/** Ad-hoc mode: review (or implement on) one existing PR directly, no webhook or public URL
+ * required — the same routing an "@bisect ..." comment would trigger, for local testing. */
+async function runOnce(prNumber: number, instruction?: string): Promise<void> {
   const githubRepo = env.githubRepo();
   if (!githubRepo) throw new Error('GITHUB_REPO must be set to use --pr.');
   const { owner, name } = parseGithubRepo(githubRepo);
 
-  const detail = await getPr(owner, name, prNumber);
-  const pr: PrInfo = {
-    number: detail.number,
-    title: detail.title,
-    body: detail.body,
-    htmlUrl: detail.html_url,
-    baseOwner: owner,
-    baseRepo: name,
-    headOwner: detail.head.repo?.owner.login ?? owner,
-    headRepo: detail.head.repo?.name ?? name,
-    headRef: detail.head.ref,
-    headSha: detail.head.sha,
-  };
+  const pr = await prInfoFromNumber(owner, name, prNumber);
 
-  const run = await runPrReview(pr);
+  if (instruction && isImplementIntent(instruction)) {
+    const run = await runPrImplement(pr, instruction);
+    console.log(`\n${'─'.repeat(70)}`);
+    console.log(`outcome: ${run.outcome}`);
+    if (run.summary) console.log(`summary: ${run.summary}`);
+    if (run.follow_up_pr_url) console.log(`follow-up PR: ${run.follow_up_pr_url}`);
+    if (run.comment_url) console.log(`comment: ${run.comment_url}`);
+    return;
+  }
+
+  const run = await runPrReview(pr, instruction);
 
   console.log(`\n${'─'.repeat(70)}`);
   console.log(`outcome: ${run.outcome}${run.result ? ` (${run.result.verdict})` : ''}`);
@@ -45,7 +43,11 @@ function main(): void {
   if (prIdx >= 0) {
     const num = Number(argv[prIdx + 1]);
     if (!Number.isFinite(num)) throw new Error('--pr requires a PR number, e.g. --pr 3');
-    runOnce(num).catch((err) => {
+
+    const instructionIdx = argv.indexOf('--instruction');
+    const instruction = instructionIdx >= 0 ? argv[instructionIdx + 1] : undefined;
+
+    runOnce(num, instruction).catch((err) => {
       console.error(err);
       process.exit(1);
     });

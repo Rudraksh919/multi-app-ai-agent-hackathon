@@ -2,12 +2,16 @@ import { createHmac, timingSafeEqual } from 'node:crypto';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { env, CONFIG } from '../config.js';
 import { reactToComment } from '../clients/github.js';
-import { runPrReview } from './run.js';
-import { prInfoFromNumber } from './lookup.js';
+import { runPrReview, runPrImplement } from './run.js';
+import { prInfoFromNumber, isImplementIntent } from './lookup.js';
 import type { PrInfo } from './types.js';
 
 /** Matches "@bisect", "@bisect review", etc. — same mention pattern GitHub's own bots use. */
 const MENTION = /@bisect\b/i;
+
+function commentInstruction(body: string): string {
+  return body.replace(MENTION, '').trim();
+}
 
 function verifySignature(payload: Buffer, signature: string | undefined, secret: string): boolean {
   if (!signature) return false;
@@ -48,8 +52,10 @@ interface GitHubIssueCommentEvent {
   repository: { owner: { login: string }; name: string };
 }
 
-/** synchronize = a new commit was pushed to an already-open PR — re-review it. */
-const HANDLED_ACTIONS = new Set(['opened', 'synchronize', 'reopened']);
+/** Only the PR's creation auto-triggers a review — pushing more commits does not. Further
+ * reviews (of any scope) or an actual code change only happen when someone asks for it with
+ * an "@bisect ..." comment; see the issue_comment handling below. */
+const HANDLED_ACTIONS = new Set(['opened']);
 
 function toPrInfo(payload: GitHubPullRequestEvent): PrInfo {
   const pr = payload.pull_request;
@@ -125,9 +131,10 @@ export function startWebhookServer(): void {
         const payload = raw as GitHubIssueCommentEvent;
         const isOnPr = Boolean(payload.issue.pull_request);
         const mentioned = MENTION.test(payload.comment.body);
-        // Guard against reviewing our own review comments if they ever happened to match —
-        // they never say "@bisect", but this is cheap insurance against a future feedback loop.
-        const isOwnComment = payload.comment.body.includes('🤖 bisect review');
+        // Guard against reacting to our own comments if they ever happened to match "@bisect"
+        // (they never do) — cheap insurance against a future feedback loop either way.
+        const isOwnComment =
+          payload.comment.body.includes('🤖 bisect review') || payload.comment.body.includes('🤖 bisect implement');
 
         if (payload.action !== 'created' || !isOnPr || !mentioned || isOwnComment) {
           res.writeHead(202).end('ignored');
@@ -138,13 +145,23 @@ export function startWebhookServer(): void {
 
         const { owner, name } = { owner: payload.repository.owner.login, name: payload.repository.name };
         const prNumber = payload.issue.number;
+        const instruction = commentInstruction(payload.comment.body);
 
         reactToComment(owner, name, payload.comment.id, 'eyes').catch(() => {});
-        prInfoFromNumber(owner, name, prNumber)
-          .then((pr) => runPrReview(pr))
-          .catch((err) => {
-            console.error(`PR review crashed for #${prNumber} (mention trigger):`, err);
-          });
+
+        if (isImplementIntent(instruction)) {
+          prInfoFromNumber(owner, name, prNumber)
+            .then((pr) => runPrImplement(pr, instruction))
+            .catch((err) => {
+              console.error(`PR implement crashed for #${prNumber} (mention trigger):`, err);
+            });
+        } else {
+          prInfoFromNumber(owner, name, prNumber)
+            .then((pr) => runPrReview(pr, instruction || undefined))
+            .catch((err) => {
+              console.error(`PR review crashed for #${prNumber} (mention trigger):`, err);
+            });
+        }
         return;
       }
 

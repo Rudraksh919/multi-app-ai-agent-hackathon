@@ -1,4 +1,12 @@
-import type { Diagnosis, Evidence, PostHogClient, PostHogEvent, RepoClient } from '../types.js';
+import type {
+  Diagnosis,
+  Evidence,
+  PostHogClient,
+  PostHogEvent,
+  RepoClient,
+  SentryClient,
+  SentryIssue,
+} from '../types.js';
 
 /** What a tool call produces: a human summary, optional evidence, optional loop exit. */
 export interface ToolOutcome {
@@ -77,6 +85,43 @@ export const TOOLS: ToolDef[] = [
       type: 'object',
       properties: { sql: { type: 'string' } },
       required: ['sql'],
+    },
+  },
+  {
+    name: 'sentry_find_issues_for_user',
+    description:
+      "Search Sentry for crashes tied to this user's email. PostHog shows what the user did; " +
+      'this shows what actually threw. Only useful if <routing_skill> points a runtime/crash ' +
+      "bug at Sentry for this codebase — otherwise it will just say Sentry isn't configured.",
+    input_schema: {
+      type: 'object',
+      properties: { email: { type: 'string' } },
+      required: ['email'],
+    },
+  },
+  {
+    name: 'sentry_search_issues',
+    description:
+      "Search Sentry issues with Sentry's own query syntax, e.g. \"is:unresolved checkout\" or " +
+      '"user.email:x@y.com timestamp:>2026-01-01". Use when you need issues NOT tied to one ' +
+      'specific user — e.g. "how many other people hit this same crash".',
+    input_schema: {
+      type: 'object',
+      properties: { query: { type: 'string' } },
+      required: ['query'],
+    },
+  },
+  {
+    name: 'sentry_issue_detail',
+    description:
+      "The full detail behind one Sentry issue id from sentry_find_issues_for_user or " +
+      'sentry_search_issues: the exception type/value, stack trace with the actual source line ' +
+      'at each frame, and the breadcrumb trail (clicks, requests, state changes) leading up to ' +
+      'the throw. This is usually the single most useful call for a runtime bug.',
+    input_schema: {
+      type: 'object',
+      properties: { issue_id: { type: 'string' } },
+      required: ['issue_id'],
     },
   },
   {
@@ -211,12 +256,23 @@ function clamp(s: string, max = 8000): string {
   return s.length <= max ? s : `${s.slice(0, max)}\n… truncated (${s.length} chars total)`;
 }
 
+function formatIssues(issues: SentryIssue[]): string {
+  if (issues.length === 0) return 'No matching Sentry issues.';
+  return issues
+    .map((i) => `[${i.id}] ${i.title}${i.culprit ? ` (${i.culprit})` : ''} — ${i.count}x, last seen ${i.lastSeen}`)
+    .join('\n');
+}
+
 export interface ToolDeps {
   posthog: PostHogClient;
   repo: RepoClient;
+  /** Optional — not every target codebase has Sentry configured. See sentry tools' runTool cases. */
+  sentry?: SentryClient;
   /** Mutated as evidence accumulates; the loop owns the array. */
   evidence: Evidence[];
 }
+
+const SENTRY_NOT_CONFIGURED = "Sentry isn't configured for this codebase — skip it and use other evidence.";
 
 function nextId(evidence: Evidence[], prefix: string): string {
   const n = evidence.filter((e) => e.id.startsWith(`${prefix}_`)).length + 1;
@@ -228,9 +284,50 @@ export async function runTool(
   input: Record<string, unknown>,
   deps: ToolDeps,
 ): Promise<ToolOutcome> {
-  const { posthog, repo, evidence } = deps;
+  const { posthog, repo, evidence, sentry } = deps;
 
   switch (name) {
+    case 'sentry_find_issues_for_user': {
+      if (!sentry) return { text: SENTRY_NOT_CONFIGURED };
+      const issues = await sentry.findIssuesForUser(String(input.email));
+      const id = nextId(evidence, 'sn');
+      return {
+        text: `[${id}]\n${formatIssues(issues)}`,
+        evidence: { id, source: 'sentry', summary: `${issues.length} Sentry issues for ${input.email}`, data: issues },
+      };
+    }
+
+    case 'sentry_search_issues': {
+      if (!sentry) return { text: SENTRY_NOT_CONFIGURED };
+      const query = String(input.query);
+      const issues = await sentry.searchIssues(query);
+      const id = nextId(evidence, 'sn');
+      return {
+        text: `[${id}]\n${formatIssues(issues)}`,
+        evidence: { id, source: 'sentry', summary: `Sentry query: ${query}`, data: issues },
+      };
+    }
+
+    case 'sentry_issue_detail': {
+      if (!sentry) return { text: SENTRY_NOT_CONFIGURED };
+      const detail = await sentry.issueLatestEvent(String(input.issue_id));
+      if (!detail) return { text: `No event found for Sentry issue ${input.issue_id}.` };
+      const id = nextId(evidence, 'sn');
+      const frameLines = detail.frames
+        .map((f) => `  ${f.filename ?? '?'}:${f.lineno ?? '?'} in ${f.function ?? '?'}${f.contextLine ? `\n    ${f.contextLine.trim()}` : ''}`)
+        .join('\n');
+      const crumbLines = detail.breadcrumbs
+        .map((b) => `  ${b.timestamp}  [${b.level}] ${b.category ?? ''} ${b.message ?? ''}`.trimEnd())
+        .join('\n');
+      const text =
+        `[${id}] ${detail.exceptionType ?? detail.title}: ${detail.exceptionValue ?? detail.message ?? ''}\n\n` +
+        `stack:\n${frameLines || '  (no frames)'}\n\n` +
+        `breadcrumbs:\n${crumbLines || '  (none)'}`;
+      return {
+        text: clamp(text),
+        evidence: { id, source: 'sentry', summary: `Sentry issue ${input.issue_id}: ${detail.title}`, data: detail },
+      };
+    }
     case 'posthog_find_person': {
       const person = await posthog.findPerson(String(input.email));
       if (!person) return { text: `No PostHog person found for ${input.email}.` };

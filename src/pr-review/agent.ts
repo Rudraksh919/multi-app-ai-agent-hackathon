@@ -56,6 +56,8 @@ export async function reviewPr(
     diffText: string;
     linearContext: string | null;
     baseUrl: string;
+    /** Extra scoping from a "@bisect ..." comment, e.g. "focus on the checkout flow only". */
+    instruction?: string;
   },
   deps: Omit<ReviewToolDeps, 'evidence'>,
   onStep?: (s: ReviewStep) => void,
@@ -92,8 +94,14 @@ ${
   context.linearContext
     ? `<linked_ticket evidence_id="linear">\n${context.linearContext}\n</linked_ticket>\n\n`
     : ''
+}${
+  context.instruction
+    ? `<reviewer_instruction>\n${context.instruction}\n</reviewer_instruction>\n\n`
+    : ''
 }The app is running at ${deps.baseUrl} — all http_request paths and browser_navigate paths are
-relative to that root. Test this PR.`,
+relative to that root. Test this PR.${
+  context.instruction ? ' Pay particular attention to what the reviewer_instruction asked for.' : ''
+}`,
     },
   ];
 

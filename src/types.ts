@@ -37,7 +37,7 @@ export interface ParsedReport {
  */
 export interface Evidence {
   id: string; // "ph_01", "file_03", "grep_02"
-  source: 'posthog' | 'repo' | 'slack';
+  source: 'posthog' | 'sentry' | 'repo' | 'slack';
   summary: string; // one line, shown to humans
   data: unknown; // full payload, kept for the run log
 }
@@ -143,6 +143,45 @@ export interface PostHogClient {
   replayUrl(sessionId: string): string;
 }
 
+/** One crash Sentry grouped repeated occurrences of — PostHog's "what the user did" counterpart
+ * for "what the code actually threw". */
+export interface SentryIssue {
+  id: string;
+  title: string;
+  culprit: string | null;
+  count: number;
+  firstSeen: string;
+  lastSeen: string;
+  permalink: string;
+}
+
+export interface SentryStackFrame {
+  filename: string | null;
+  function: string | null;
+  lineno: number | null;
+  contextLine: string | null;
+}
+
+/** The most recent occurrence of an issue, with the detail a diagnosis actually needs:
+ * the stack trace and the breadcrumb trail leading up to the throw. */
+export interface SentryEventDetail {
+  eventId: string;
+  title: string;
+  message: string | null;
+  exceptionType: string | null;
+  exceptionValue: string | null;
+  frames: SentryStackFrame[];
+  breadcrumbs: { timestamp: string; category: string | null; message: string | null; level: string }[];
+  tags: Record<string, string>;
+}
+
+export interface SentryClient {
+  /** Sentry's own search syntax, e.g. "user.email:x@y.com" or "is:unresolved checkout". */
+  searchIssues(query: string): Promise<SentryIssue[]>;
+  findIssuesForUser(email: string): Promise<SentryIssue[]>;
+  issueLatestEvent(issueId: string): Promise<SentryEventDetail | null>;
+}
+
 export interface RepoClient {
   /** Directory listing, repo-relative, directories suffixed with '/'. */
   list(dir: string): Promise<string[]>;
@@ -161,12 +200,15 @@ export interface RepoClient {
 export interface GitHubClient {
   /** true if this repo has GitHub write access configured (a token + owner/repo). */
   available(): boolean;
-  /** Create a branch, commit the given file writes, push, and open a PR. Returns the PR URL. */
+  /** Create a branch, commit the given file writes, push, and open a PR. Returns the PR URL.
+   * `base` overrides the repo's default branch — used when the fix should target an existing
+   * PR's own branch rather than main. */
   commitAndOpenPr(input: {
     branch: string;
     title: string;
     body: string;
     files: { path: string; content: string }[];
+    base?: string;
   }): Promise<string | null>;
 }
 

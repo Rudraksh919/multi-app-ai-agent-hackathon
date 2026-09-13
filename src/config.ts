@@ -41,6 +41,16 @@ export const env = {
   linearTeam: () => process.env.LINEAR_TEAM_ID || null,
 
   /**
+   * Sentry is optional, unlike PostHog — not every target codebase has it, and bisect-skills
+   * routing (see src/skills/) is what decides whether to query it at all for a given bug.
+   * All three null = the sentry tools tell the agent it isn't configured, rather than crash.
+   */
+  sentryAuthToken: () => process.env.SENTRY_AUTH_TOKEN || null,
+  sentryOrg: () => process.env.SENTRY_ORG || null,
+  sentryProject: () => process.env.SENTRY_PROJECT || null,
+  sentryHost: () => optional('SENTRY_HOST', 'https://sentry.io').replace(/\/$/, ''),
+
+  /**
    * Repo access is either GITHUB_REPO ("owner/repo", cloned fresh via git) or a plain
    * local REPO_PATH. GITHUB_REPO is what makes bisect work on any codebase rather than
    * one fixed local checkout — see src/repo/resolve.ts.
@@ -143,6 +153,8 @@ export const CONFIG = {
     /** Hard ceiling on tool calls (http/browser actions) per PR review. */
     maxSteps: 20,
     maxTokens: 8000,
+    /** Higher than review's — implementing needs read+write+verify cycles, not just probing. */
+    implementMaxSteps: 25,
     /** How long to wait for `npm install && npm run dev` to answer HTTP before giving up. */
     sandboxReadyTimeoutMs: 90_000,
     npmInstallTimeoutMs: 5 * 60_000,

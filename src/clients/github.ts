@@ -124,7 +124,7 @@ export function makeGitHubClient(owner: string | null, repo: string | null, repo
       return Boolean(githubAuthConfigured() && owner && repo);
     },
 
-    async commitAndOpenPr({ branch, title, body, files }) {
+    async commitAndOpenPr({ branch, title, body, files, base: baseOverride }) {
       if (!this.available() || !owner || !repo) return null;
       const cwd = repoClient.root();
 
@@ -132,7 +132,7 @@ export function makeGitHubClient(owner: string | null, repo: string | null, repo
         await repoClient.write(f.path, f.content);
       }
 
-      const base = await defaultBranch(cwd);
+      const base = baseOverride ?? (await defaultBranch(cwd));
       await git(['checkout', '-b', branch], cwd);
       await git(['add', ...files.map((f) => f.path)], cwd);
       await git(['-c', 'user.email=bisect@local', '-c', 'user.name=bisect', 'commit', '-m', title], cwd);

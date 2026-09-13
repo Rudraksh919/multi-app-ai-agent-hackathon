@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { CONFIG, env } from './config.js';
 import { makeLinearClient } from './clients/linear.js';
 import { makePostHogClient } from './clients/posthog.js';
+import { makeSentryClient } from './clients/sentry.js';
 import { makeSlackClient } from './clients/slack.js';
 import { investigate } from './agent/investigate.js';
 import { implementFix } from './agent/implement.js';
@@ -117,9 +118,10 @@ async function runOne(message: SlackMessage, opts: Options): Promise<Investigati
   }
 
   // ── 2. Investigate ───────────────────────────────────────────────────
+  const sentry = env.sentryAuthToken() ? makeSentryClient() : undefined;
   const result = await investigate(
     report,
-    { posthog: makePostHogClient(), repo },
+    { posthog: makePostHogClient(), repo, sentry },
     {
       skillMd,
       onStep: (s) =>

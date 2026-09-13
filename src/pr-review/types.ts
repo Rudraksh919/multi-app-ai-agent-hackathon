@@ -74,3 +74,36 @@ export interface PrReviewRun {
     cost_usd: number;
   };
 }
+
+export type PrImplementOutcome =
+  | 'IMPLEMENTED' // sandbox booted, agent made + verified a change, PR opened
+  | 'NO_CHANGE' // agent concluded without writing anything (e.g. instruction was unclear/already done)
+  | 'SANDBOX_FAILED'
+  | 'ERROR';
+
+export interface PrImplementStep {
+  idx: number;
+  tool: string;
+  summary: string;
+}
+
+export interface PrImplementRun {
+  id: string;
+  started_at: string;
+  pr: PrInfo;
+  instruction: string;
+  steps: PrImplementStep[];
+  summary: string | null;
+  files_changed: string[];
+  follow_up_pr_url: string | null;
+  outcome: PrImplementOutcome;
+  error?: string;
+  comment_url?: string;
+  stats: {
+    duration_ms: number;
+    tool_calls: number;
+    input_tokens: number;
+    output_tokens: number;
+    cost_usd: number;
+  };
+}
