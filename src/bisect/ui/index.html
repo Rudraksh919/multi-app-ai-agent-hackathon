@@ -8,7 +8,7 @@
   :root {
     --bg: #0b0e14; --panel: #11151d; --border: #1f2733; --text: #e6e9ef; --muted: #8590a6;
     --diagnosed: #3fb950; --no_session: #d29922; --no_diagnosis: #d29922; --skipped: #6e7681;
-    --accent: #58a6ff;
+    --error: #f85149; --accent: #58a6ff;
   }
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.5 -apple-system, Segoe UI, sans-serif; }
@@ -16,15 +16,20 @@
   header .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--diagnosed); }
   header h1 { font-size: 16px; margin: 0; font-weight: 700; letter-spacing: 0.02em; }
   header span { color: var(--muted); font-size: 12px; }
+  nav { display: flex; gap: 4px; margin-left: 16px; }
+  nav button { background: none; border: none; color: var(--muted); font-size: 13px; font-weight: 600; padding: 6px 12px; border-radius: 6px; cursor: pointer; }
+  nav button:hover { color: var(--text); }
+  nav button.active { background: var(--panel); color: var(--accent); }
   .layout { display: grid; grid-template-columns: 340px 1fr; height: calc(100vh - 57px); }
   .list { border-right: 1px solid var(--border); overflow-y: auto; }
   .row { padding: 12px 16px; border-bottom: 1px solid var(--border); cursor: pointer; }
   .row:hover { background: var(--panel); }
   .row.active { background: var(--panel); border-left: 3px solid var(--accent); }
   .badge { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; }
-  .badge.DIAGNOSED { background: rgba(63,185,80,.15); color: var(--diagnosed); }
-  .badge.NO_SESSION, .badge.NO_DIAGNOSIS { background: rgba(210,153,34,.15); color: var(--no_session); }
+  .badge.DIAGNOSED, .badge.approve, .badge.REVIEWED, .badge.IMPLEMENTED { background: rgba(63,185,80,.15); color: var(--diagnosed); }
+  .badge.NO_SESSION, .badge.NO_DIAGNOSIS, .badge.comment, .badge.NO_CHANGE { background: rgba(210,153,34,.15); color: var(--no_session); }
   .badge.SKIPPED { background: rgba(110,118,129,.15); color: var(--skipped); }
+  .badge.request_changes, .badge.SANDBOX_FAILED, .badge.ERROR { background: rgba(248,81,73,.15); color: var(--error); }
   .row .symptom { margin-top: 6px; font-size: 13px; color: var(--text); }
   .row .meta { margin-top: 4px; font-size: 11px; color: var(--muted); }
   .stats-bar { display: flex; gap: 28px; padding: 10px 20px; border-bottom: 1px solid var(--border); background: var(--panel); }
@@ -47,6 +52,11 @@
   a { color: var(--accent); text-decoration: none; }
   a:hover { text-decoration: underline; }
   .pill { display: inline-block; background: #0d2540; color: var(--accent); border-radius: 4px; padding: 1px 6px; font-size: 11px; margin-right: 4px; }
+  .finding { border-bottom: 1px solid var(--border); padding: 10px 0; }
+  .finding:last-child { border-bottom: none; }
+  .finding .sev { font-weight: 700; text-transform: uppercase; font-size: 10px; letter-spacing: 0.04em; margin-right: 8px; }
+  .finding .sev.blocker, .finding .sev.major { color: var(--error); }
+  .finding .sev.minor, .finding .sev.nit { color: var(--muted); }
 </style>
 </head>
 <body>
@@ -54,6 +64,10 @@
   <div class="dot" id="live-dot"></div>
   <h1>bisect</h1>
   <span id="run-count">loading…</span>
+  <nav>
+    <button id="tab-runs" class="active">Investigations</button>
+    <button id="tab-pr">PR Reviews</button>
+  </nav>
 </header>
 <div class="stats-bar" id="stats-bar"></div>
 <div class="layout">
@@ -62,33 +76,71 @@
 </div>
 <script>
 const OUTCOME_LABEL = { DIAGNOSED: 'Diagnosed', NO_SESSION: 'Need info', NO_DIAGNOSIS: 'No diagnosis', SKIPPED: 'Skipped' };
+const PR_OUTCOME_LABEL = { REVIEWED: 'Reviewed', SANDBOX_FAILED: 'Sandbox failed', ERROR: 'Error', IMPLEMENTED: 'Implemented', NO_CHANGE: 'No change' };
+const VERDICT_LABEL = { approve: 'Approve', request_changes: 'Request changes', comment: 'Comment' };
 
+let view = 'runs';
 let runs = [];
+let prRuns = [];
 let activeId = null;
 
+document.getElementById('tab-runs').addEventListener('click', () => switchView('runs'));
+document.getElementById('tab-pr').addEventListener('click', () => switchView('pr'));
+
+function switchView(next) {
+  view = next;
+  activeId = null;
+  document.getElementById('tab-runs').classList.toggle('active', view === 'runs');
+  document.getElementById('tab-pr').classList.toggle('active', view === 'pr');
+  document.getElementById('detail').innerHTML = `<div class="empty">Select ${view === 'runs' ? 'an investigation' : 'a PR run'}</div>`;
+  render();
+}
+
 async function refresh() {
-  const res = await fetch('/api/runs');
-  runs = await res.json();
-  document.getElementById('run-count').textContent = runs.length + ' investigation' + (runs.length === 1 ? '' : 's');
+  const [runsRes, prRes] = await Promise.all([fetch('/api/runs'), fetch('/api/pr-reviews')]);
+  runs = await runsRes.json();
+  prRuns = await prRes.json();
+  render();
+}
+
+function render() {
+  const count = view === 'runs' ? runs.length : prRuns.length;
+  const noun = view === 'runs' ? 'investigation' : 'PR run';
+  document.getElementById('run-count').textContent = count + ' ' + noun + (count === 1 ? '' : 's');
   renderStats();
   renderList();
 }
 
 function renderStats() {
   const bar = document.getElementById('stats-bar');
-  if (runs.length === 0) { bar.innerHTML = ''; return; }
+  if (view === 'runs') {
+    if (runs.length === 0) { bar.innerHTML = ''; return; }
+    const diagnosed = runs.filter(r => r.outcome === 'DIAGNOSED').length;
+    const abstained = runs.filter(r => r.outcome === 'NO_SESSION' || r.outcome === 'NO_DIAGNOSIS').length;
+    const totalCost = runs.reduce((s, r) => s + r.cost_usd, 0);
+    const avgDuration = runs.reduce((s, r) => s + r.duration_ms, 0) / runs.length / 1000;
+    const confidences = runs.map(r => r.confidence).filter(c => typeof c === 'number');
+    const avgConfidence = confidences.length ? confidences.reduce((s, c) => s + c, 0) / confidences.length : null;
+    bar.innerHTML = `
+      <div class="chip"><b>${diagnosed}</b>diagnosed</div>
+      <div class="chip"><b>${abstained}</b>honest abstention${abstained === 1 ? '' : 's'}</div>
+      ${avgConfidence !== null ? `<div class="chip"><b>${avgConfidence.toFixed(2)}</b>avg confidence</div>` : ''}
+      <div class="chip"><b>${avgDuration.toFixed(1)}s</b>avg duration</div>
+      <div class="chip"><b>$${totalCost.toFixed(3)}</b>total cost</div>
+    `;
+    return;
+  }
 
-  const diagnosed = runs.filter(r => r.outcome === 'DIAGNOSED').length;
-  const abstained = runs.filter(r => r.outcome === 'NO_SESSION' || r.outcome === 'NO_DIAGNOSIS').length;
-  const totalCost = runs.reduce((s, r) => s + r.cost_usd, 0);
-  const avgDuration = runs.reduce((s, r) => s + r.duration_ms, 0) / runs.length / 1000;
-  const confidences = runs.map(r => r.confidence).filter(c => typeof c === 'number');
-  const avgConfidence = confidences.length ? confidences.reduce((s, c) => s + c, 0) / confidences.length : null;
-
+  if (prRuns.length === 0) { bar.innerHTML = ''; return; }
+  const approved = prRuns.filter(r => r.verdict === 'approve').length;
+  const blocked = prRuns.filter(r => r.verdict === 'request_changes').length;
+  const implemented = prRuns.filter(r => r.outcome === 'IMPLEMENTED').length;
+  const totalCost = prRuns.reduce((s, r) => s + r.cost_usd, 0);
+  const avgDuration = prRuns.reduce((s, r) => s + r.duration_ms, 0) / prRuns.length / 1000;
   bar.innerHTML = `
-    <div class="chip"><b>${diagnosed}</b>diagnosed</div>
-    <div class="chip"><b>${abstained}</b>honest abstention${abstained === 1 ? '' : 's'}</div>
-    ${avgConfidence !== null ? `<div class="chip"><b>${avgConfidence.toFixed(2)}</b>avg confidence</div>` : ''}
+    <div class="chip"><b>${approved}</b>approved</div>
+    <div class="chip"><b>${blocked}</b>changes requested</div>
+    <div class="chip"><b>${implemented}</b>fixes implemented</div>
     <div class="chip"><b>${avgDuration.toFixed(1)}s</b>avg duration</div>
     <div class="chip"><b>$${totalCost.toFixed(3)}</b>total cost</div>
   `;
@@ -96,28 +148,47 @@ function renderStats() {
 
 function renderList() {
   const el = document.getElementById('list');
-  if (runs.length === 0) {
-    el.innerHTML = '<div class="empty">No runs yet — investigate a bug and it will show up here.</div>';
+  const items = view === 'runs' ? runs : prRuns;
+
+  if (items.length === 0) {
+    el.innerHTML = `<div class="empty">No ${view === 'runs' ? 'runs' : 'PR runs'} yet.</div>`;
     return;
   }
-  el.innerHTML = runs.map(r => `
-    <div class="row ${r.id === activeId ? 'active' : ''}" data-id="${r.id}">
-      <span class="badge ${r.outcome}">${OUTCOME_LABEL[r.outcome] ?? r.outcome}</span>
-      <div class="symptom">${escapeHtml(r.symptom)}</div>
-      <div class="meta">${new Date(r.started_at).toLocaleString()} · ${(r.duration_ms/1000).toFixed(1)}s · ${r.tool_calls} calls · $${r.cost_usd.toFixed(3)}</div>
-    </div>
-  `).join('');
+
+  if (view === 'runs') {
+    el.innerHTML = items.map(r => `
+      <div class="row ${r.id === activeId ? 'active' : ''}" data-id="${r.id}">
+        <span class="badge ${r.outcome}">${OUTCOME_LABEL[r.outcome] ?? r.outcome}</span>
+        <div class="symptom">${escapeHtml(r.symptom)}</div>
+        <div class="meta">${new Date(r.started_at).toLocaleString()} · ${(r.duration_ms/1000).toFixed(1)}s · ${r.tool_calls} calls · $${r.cost_usd.toFixed(3)}</div>
+      </div>
+    `).join('');
+  } else {
+    el.innerHTML = items.map(r => `
+      <div class="row ${r.id === activeId ? 'active' : ''}" data-id="${r.id}">
+        <span class="badge ${r.verdict ?? r.outcome}">${r.verdict ? VERDICT_LABEL[r.verdict] : (PR_OUTCOME_LABEL[r.outcome] ?? r.outcome)}</span>
+        <span class="pill">${r.kind}</span>
+        <div class="symptom">#${r.pr_number} ${escapeHtml(r.pr_title)}</div>
+        <div class="meta">${new Date(r.started_at).toLocaleString()} · ${(r.duration_ms/1000).toFixed(1)}s · ${r.tool_calls} calls · $${r.cost_usd.toFixed(3)}</div>
+      </div>
+    `).join('');
+  }
+
   el.querySelectorAll('.row').forEach(row => {
-    row.addEventListener('click', () => selectRun(row.dataset.id));
+    row.addEventListener('click', () => selectItem(row.dataset.id));
   });
 }
 
-async function selectRun(id) {
+async function selectItem(id) {
   activeId = id;
   renderList();
-  const res = await fetch('/api/runs/' + id);
-  const inv = await res.json();
-  renderDetail(inv);
+  if (view === 'runs') {
+    const res = await fetch('/api/runs/' + id);
+    renderDetail(await res.json());
+  } else {
+    const res = await fetch('/api/pr-reviews/' + id);
+    renderPrDetail(await res.json());
+  }
 }
 
 function timelineText(inv) {
@@ -188,6 +259,80 @@ function renderDetail(inv) {
     <div class="card">
       <h3>Investigation steps</h3>
       <pre>${inv.steps.map(s => `${String(s.idx).padStart(2)}. ${s.tool.padEnd(26)} ${escapeHtml((s.summary||'').split('\\n')[0])}`).join('\n')}</pre>
+    </div>
+  `;
+}
+
+function renderPrDetail(run) {
+  const el = document.getElementById('detail');
+  const isImplement = run.id.startsWith('pri_');
+  const badgeClass = run.result?.verdict ?? run.outcome;
+  const badgeLabel = run.result?.verdict ? VERDICT_LABEL[run.result.verdict] : (PR_OUTCOME_LABEL[run.outcome] ?? run.outcome);
+  const cited = new Set((run.result?.findings ?? []).flatMap(f => f.evidence_refs));
+
+  el.innerHTML = `
+    <span class="badge ${badgeClass}">${badgeLabel}</span>
+    <h2><a href="${run.pr.htmlUrl}" target="_blank">#${run.pr.number} ${escapeHtml(run.pr.title)}</a></h2>
+    <div class="stat-row">
+      <div><b>${(run.stats.duration_ms/1000).toFixed(1)}s</b>duration</div>
+      <div><b>${run.stats.tool_calls}</b>tool calls</div>
+      <div><b>$${run.stats.cost_usd.toFixed(3)}</b>cost</div>
+    </div>
+
+    ${isImplement ? `
+    <div class="card">
+      <h3>Instruction</h3>
+      <p>${escapeHtml(run.instruction)}</p>
+    </div>
+    <div class="card">
+      <h3>${run.error ? 'Error' : 'Result'}</h3>
+      <p>${escapeHtml(run.error ?? run.summary ?? 'No summary recorded.')}</p>
+      ${run.files_changed?.length ? `<p style="margin-top:10px">${run.files_changed.map(f => `<span class="pill">${escapeHtml(f)}</span>`).join('')}</p>` : ''}
+      ${run.follow_up_pr_url ? `<p style="margin-top:10px"><a href="${run.follow_up_pr_url}" target="_blank">🔧 Follow-up PR</a></p>` : ''}
+    </div>
+    ` : `
+    <div class="card">
+      <h3>${run.error ? 'Error' : 'Summary'}</h3>
+      <p>${escapeHtml(run.error ?? run.result?.summary ?? 'No summary recorded.')}</p>
+    </div>
+    ${run.result?.findings?.length ? `
+    <div class="card">
+      <h3>Findings</h3>
+      ${run.result.findings.map(f => `
+        <div class="finding">
+          <span class="sev ${f.severity}">${f.severity}</span>
+          <span class="pill">${escapeHtml(f.area)}</span>
+          <p style="margin-top:6px">${escapeHtml(f.description)}</p>
+          ${f.evidence_refs?.length ? `<p style="margin-top:4px;color:var(--muted);font-size:11px">cites: ${f.evidence_refs.join(', ')}</p>` : ''}
+        </div>
+      `).join('')}
+    </div>` : ''}
+    `}
+
+    ${run.linear_ticket ? `
+    <div class="card">
+      <h3>Linked ticket</h3>
+      <p><a href="${run.linear_ticket.url}" target="_blank">📋 ${escapeHtml(run.linear_ticket.identifier)}: ${escapeHtml(run.linear_ticket.title)}</a></p>
+    </div>` : ''}
+
+    ${run.comment_url ? `
+    <div class="card">
+      <h3>Posted comment</h3>
+      <p><a href="${run.comment_url}" target="_blank">View on GitHub</a></p>
+    </div>` : ''}
+
+    ${run.evidence?.length ? `
+    <div class="card">
+      <h3>Evidence${cited.size ? ' (green = cited in a finding)' : ''}</h3>
+      <table>
+        <tr><th>id</th><th>kind</th><th>what</th></tr>
+        ${run.evidence.map(e => `<tr class="${cited.has(e.id) ? 'cited' : ''}"><td>${e.id}</td><td>${e.kind}</td><td>${escapeHtml(e.summary)}</td></tr>`).join('')}
+      </table>
+    </div>` : ''}
+
+    <div class="card">
+      <h3>Steps</h3>
+      <pre>${run.steps.map(s => `${String(s.idx).padStart(2)}. ${s.tool.padEnd(18)} ${escapeHtml((s.summary||'').split('\\n')[0])}`).join('\n')}</pre>
     </div>
   `;
 }

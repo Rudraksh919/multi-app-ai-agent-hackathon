@@ -23,6 +23,10 @@ like this" instead of rediscovering the codebase from scratch. `npm run setup` i
 path to pointing either agent at your own repo, your own Slack, your own Linear team, your own
 PostHog/Sentry project.
 
+## Demo video
+
+[Demo video](https://drive.google.com/drive/folders/1Owqc2kI3GZt7kysIOSOo-6gG5hH-hmUz)
+
 ## How the pieces fit together
 
 ```
@@ -290,11 +294,17 @@ npm run start    # same thing, no watch
 npm run once     # process whatever is new in the channel once, then exit
 ```
 
-The local dashboard, reading everything under `runs/`:
+The local dashboard, reading everything under `runs/` and `pr-reviews/`:
 
 ```bash
 npm run ui       # http://localhost:4321
 ```
+
+It has two tabs: **Investigations** (bisect's runs) and **PR Reviews** (pr-manager's reviews and
+implement runs). The PR Reviews tab shows a stats bar (approved, changes requested, fixes
+implemented, average duration, total cost), a list of PRs with their verdict or outcome, and a
+detail view with findings cited against evidence, or, for an implement run, the files changed and
+a link to the follow-up PR.
 
 Fast dev loop, skipping Slack and Linear entirely and printing the would-be ticket to stdout:
 
@@ -426,10 +436,10 @@ it lands.
 ## Where everything is recorded
 
 Every bisect run, including every tool call, all evidence collected, the diagnosis or the
-abstention reason, cost, and duration, is written to `runs/<id>.json`. Every pr-manager run is
-written the same way to `pr-reviews/<id>.json`. `npm run ui` reads the `runs/` directory to
-render the dashboard at `http://localhost:4321`; there is no equivalent dashboard yet for
-`pr-reviews/`, but the JSON is just as inspectable directly.
+abstention reason, cost, and duration, is written to `runs/<id>.json`. Every pr-manager run,
+both a review (`prr_<id>.json`) and an implement run (`pri_<id>.json`), is written the same way
+to `pr-reviews/`. `npm run ui` reads both directories and renders them at
+`http://localhost:4321`, with a tab for each.
 
 ## Project layout
 
@@ -474,8 +484,9 @@ src/
     steps/parse.ts              Slack text to structured report
     report/render.ts            Linear markdown and Slack Block Kit formatting
     ui/
-      server.ts                  a small Node http server, no framework
-      index.html                  the dashboard, reading runs/*.json
+      server.ts                  a small Node http server, no framework, serving both
+                                 runs/*.json and pr-reviews/*.json
+      index.html                  the dashboard, one tab per pipeline
 
   pr-manager/                the review pipeline
     types.ts                    ReviewResult, PrReviewRun, PrImplementRun

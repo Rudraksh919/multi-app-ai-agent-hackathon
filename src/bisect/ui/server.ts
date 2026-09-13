@@ -56,6 +56,73 @@ async function getRun(id: string): Promise<Investigation | null> {
   }
 }
 
+interface PrRunFile {
+  id: string;
+  started_at: string;
+  pr: { number: number; title: string; htmlUrl: string };
+  outcome: string;
+  error?: string;
+  result?: { verdict: string; summary: string } | null;
+  summary?: string | null;
+  stats: { duration_ms: number; tool_calls: number; cost_usd: number };
+}
+
+interface PrRunSummary {
+  id: string;
+  kind: 'review' | 'implement';
+  started_at: string;
+  pr_number: number;
+  pr_title: string;
+  outcome: string;
+  verdict: string | null;
+  duration_ms: number;
+  cost_usd: number;
+  tool_calls: number;
+}
+
+function prRunKind(run: PrRunFile): 'review' | 'implement' {
+  return run.id.startsWith('pri_') ? 'implement' : 'review';
+}
+
+async function listPrRuns(): Promise<PrRunSummary[]> {
+  let files: string[];
+  try {
+    files = (await readdir(CONFIG.prReviewsDir)).filter((f) => f.endsWith('.json'));
+  } catch {
+    return [];
+  }
+
+  const runs = await Promise.all(
+    files.map(async (f) => {
+      const raw = await readFile(join(CONFIG.prReviewsDir, f), 'utf8');
+      const run = JSON.parse(raw) as PrRunFile;
+      return {
+        id: run.id,
+        kind: prRunKind(run),
+        started_at: run.started_at,
+        pr_number: run.pr.number,
+        pr_title: run.pr.title,
+        outcome: run.outcome,
+        verdict: run.result?.verdict ?? null,
+        duration_ms: run.stats.duration_ms,
+        cost_usd: run.stats.cost_usd,
+        tool_calls: run.stats.tool_calls,
+      } satisfies PrRunSummary;
+    }),
+  );
+
+  return runs.sort((a, b) => b.started_at.localeCompare(a.started_at));
+}
+
+async function getPrRun(id: string): Promise<PrRunFile | null> {
+  try {
+    const raw = await readFile(join(CONFIG.prReviewsDir, `${id}.json`), 'utf8');
+    return JSON.parse(raw) as PrRunFile;
+  } catch {
+    return null;
+  }
+}
+
 const server = createServer(async (req, res) => {
   const url = new URL(req.url ?? '/', 'http://localhost');
 
@@ -84,6 +151,26 @@ const server = createServer(async (req, res) => {
       }
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(inv));
+      return;
+    }
+
+    if (url.pathname === '/api/pr-reviews') {
+      const runs = await listPrRuns();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(runs));
+      return;
+    }
+
+    const prRunMatch = url.pathname.match(/^\/api\/pr-reviews\/([\w-]+)$/);
+    if (prRunMatch?.[1]) {
+      const run = await getPrRun(prRunMatch[1]);
+      if (!run) {
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'not found' }));
+        return;
+      }
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(run));
       return;
     }
 
